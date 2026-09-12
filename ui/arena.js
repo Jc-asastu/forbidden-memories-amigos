@@ -27,7 +27,7 @@ $('arena-deck-select').onchange=()=>{menuSound();action('choose-deck',{id:$('are
 $('arena-code-button').onclick=()=>$('join-private').click();$('arena-retry').onclick=()=>enterArena();
 $('arena-audio').onclick=()=>{arenaMuted=!arenaMuted;$('arena-audio').textContent='Sonido: '+(arenaMuted?'desactivado':'activado');menuSound();};
 document.addEventListener('keydown',e=>{
- if(page!=='rooms')return;const dialog=document.querySelector('dialog[open]'),active=document.activeElement;
+ if(document.body.classList.contains('at-launcher')||page!=='rooms')return;const dialog=document.querySelector('dialog[open]'),active=document.activeElement;
  if(e.key==='Escape'&&!dialog){e.preventDefault();$('arena-exit').click();return;}
  if(active?.tagName==='SELECT'||(active?.tagName==='INPUT'&&active.type!=='checkbox'))return;
  if(['ArrowDown','ArrowUp','ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();const list=focusable(dialog||$('page-rooms'));let i=list.indexOf(active);const dir=['ArrowUp','ArrowLeft'].includes(e.key)?-1:1;i=(i+dir+list.length)%list.length;list[i]?.focus();if(list[i]?.dataset.room){selectedRoom=list[i].dataset.room;renderArena();}menuSound();}

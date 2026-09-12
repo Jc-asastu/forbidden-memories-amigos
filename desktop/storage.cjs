@@ -4,7 +4,7 @@ const REQUIRED_BYTES=4*1024**3;
 function storagePath(settings,data,{packaged=false,exe=process.execPath}={}){
  if(settings.storagePath)return path.resolve(settings.storagePath);
  if(fs.existsSync(path.join(data,'native-0.5.9'))||fs.existsSync(path.join(data,'library'))||settings.gameExe)return data;
- return packaged?path.join(path.dirname(exe),'GameData'):data;
+ return packaged?path.dirname(exe)+'-GameData':data;
 }
 function existingAncestor(directory){let p=path.resolve(directory);while(!fs.existsSync(p)){const parent=path.dirname(p);if(parent===p)throw Error('Ese disco no está disponible. Elegí otra carpeta.');p=parent;}return p;}
 function spaceInfo(directory,statfs=fs.statfsSync){try{const s=statfs(existingAncestor(directory));return {path:directory,freeBytes:Number(s.bavail)*Number(s.bsize),requiredBytes:REQUIRED_BYTES};}catch{return {path:directory,freeBytes:null,requiredBytes:REQUIRED_BYTES};}}

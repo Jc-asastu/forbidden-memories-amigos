@@ -5,6 +5,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const {WebSocket} = require('ws');
 const {LocalStore} = require('./store.cjs');
+const {Updater}=require('./updater.cjs');
+const {preserve,inside}=require('../assets/preserve-data.cjs');
+const {spawn}=require('node:child_process');
 const {GameRunner} = require('./game.cjs');
 const {installRuntime} = require('./install.cjs');
 const {startTunnel} = require('./tunnel.cjs');
@@ -26,12 +29,13 @@ fs.mkdirSync(DATA, {recursive: true}); app.setPath('userData', path.join(DATA, '
 const primaryInstance = app.requestSingleInstanceLock();
 if (!primaryInstance) app.quit();
 app.on('second-instance', () => { if (window && !window.isDestroyed()) { if (window.isMinimized()) window.restore(); window.show(); window.focus(); } });
-let store, runner, window, socket, localServer, tunnel, match, quitting = false;
+let store, runner, window, socket, localServer, tunnel, match, updater, quitting = false, installingUpdate = false;
+let identityConfirmed=false;
 const setupJob={busy:false,stage:'',progress:0,error:''};
 const net = {connected: false, connecting: false, id: null, rooms: [], room: null, status: 'Sin conexión', hosting: false, addresses: [], internetUrl: '', openingInternet: false};
 const report = (message, kind = 'info') => { if (window && !window.isDestroyed()) window.webContents.send('notice', {message, kind}); };
 function heavyData(){return storagePath(store.state.settings,DATA,{packaged:app.isPackaged});}
-function snapshot() { return {local: store.snapshot(), network: net, game: {running: !!runner.child, mode: runner.mode, bootStage: runner.bootStage || '', ...runner.paths()}, build: '0.5.9-amigos-0.6.1', starters: starterList(), setup: {...setupStatus(store,runner,setupJob),storage:spaceInfo(heavyData())}}; }
+function snapshot() { return {local: store.snapshot(), network: net, game: {running: !!runner.child, mode: runner.mode, bootStage: runner.bootStage || '', ...runner.paths()}, build: '0.5.9-amigos-0.7.0', launcher: {confirmed:identityConfirmed,version:app.getVersion(),startPage:process.argv.includes('--multiplayer')?'rooms':'home'}, update: {...updater?.state}, starters: starterList(), setup: {...setupStatus(store,runner,setupJob),storage:spaceInfo(heavyData())}}; }
 function publish() { if (window && !window.isDestroyed()) window.webContents.send('state', snapshot()); }
 function send(value) { if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error('Conectate al servidor de salas primero.'); socket.send(JSON.stringify(value)); }
 function endMatch(notifyServer = false) {
@@ -105,6 +109,30 @@ function register() {
   ipcMain.handle('action', async (event, action, payload = {}) => {
     if (event.sender !== window.webContents) throw new Error('Unknown window');
     try {
+      if(action==='check-update'){await updater.check();return {ok:true,state:snapshot()};}
+      if(action==='download-update'){await updater.download();return {ok:true,state:snapshot()};}
+      if(action==='install-update'){
+        if(!app.isPackaged)throw Error('La actualización se instala desde el launcher instalado.');
+        if(runner.child||net.room||net.connecting||net.openingInternet||setupJob.busy||installingUpdate)throw Error('Terminá la partida y salí de la sala antes de actualizar.');
+        installingUpdate=true;
+        try{
+          const file=await updater.verifiedFile();
+          const installDir=path.dirname(process.execPath);
+          checkSpace(installDir,650*1024**2);
+          preserve(installDir,DATA);store=new LocalStore(DATA);runner.store=store;
+          const temp=path.join(path.dirname(file),'installer-temp');fs.mkdirSync(temp,{recursive:true});
+          const child=spawn(file,['/S','--updated','/D='+installDir],{detached:true,stdio:'ignore',windowsHide:true,env:{...process.env,TEMP:temp,TMP:temp}});
+          await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});child.unref();
+          quitting=true;endMatch(false);socket?.close();tunnel?.stop();localServer?.close();app.quit();
+          return {ok:true};
+        }catch(e){installingUpdate=false;throw e;}
+      }
+      if(action==='confirm-user'||action==='login-user'){
+        if(action==='login-user'&&(runner.child||net.connected||net.connecting||setupJob.busy))throw Error('Cerrá el juego antes de cambiar de usuario.');
+        if(action==='login-user')store.login(payload.name);else store.profile();
+        identityConfirmed=true;publish();return {ok:true,state:snapshot()};
+      }
+      if(installingUpdate)throw Error('La actualización está por instalarse.');
       if(action==='choose-storage'){
         if(runner.child||net.room||setupJob.busy)throw Error('Esperá a que termine la preparación o cerrá el juego antes de cambiar la carpeta.');
         const selected=await dialog.showOpenDialog(window,{title:'Elegí el disco para las descargas y el juego',defaultPath:heavyData(),properties:['openDirectory','createDirectory']});
@@ -183,6 +211,9 @@ app.whenReady().then(async () => {
   if (fs.existsSync(defaults) && !store.state.settings.discPath) store.settings(JSON.parse(fs.readFileSync(defaults, 'utf8')));
   if (!store.state.settings.gameExe) { const exe = installRuntime(ROOT, DATA); if (exe) store.settings({gameExe: exe}); }
   runner = new GameRunner(store, ROOT);
+  identityConfirmed=process.argv.includes('--qa')&&!process.argv.includes('--qa-launcher');
+  updater=new Updater({version:app.getVersion(),directory:()=>inside(path.dirname(process.execPath),heavyData())?path.dirname(process.execPath)+'-Updates':path.join(heavyData(),'updates')});
+  updater.on('change',publish);
   runner.on('problem', text => report(text, 'error'));
   runner.on('started', publish);
   runner.on('boot-stage',stage=>{net.status=stage;publish();});
@@ -205,7 +236,9 @@ app.whenReady().then(async () => {
   if(store.state.settings.discPath && (store.state.settings.discVerified!==DISC_SHA1||!fs.existsSync(store.state.settings.discPath))){try{await prepareGame(store.state.settings.discPath);}catch{}}
   if(store.state.settings.discVerified===DISC_SHA1&&runner.paths().exe&&!fs.existsSync(path.join(path.dirname(runner.paths().exe),'.amigos-runtime-v5'))){try{Object.assign(setupJob,{busy:true,stage:'Actualizando tu juego…',progress:null});publish();const destination=heavyData();checkSpace(destination);const exe=await buildRuntime(ROOT,destination,store.state.settings.discPath,p=>{Object.assign(setupJob,p);publish();});store.settings({gameExe:exe});}catch(e){setupJob.error=e.message;}finally{setupJob.busy=false;publish();}}
   publish();
-  if(process.argv.includes('--multiplayer')&&setupStatus(store,runner,setupJob).ready)await window.webContents.executeJavaScript("showPage('rooms')");
+  if(!process.argv.includes('--qa'))updater.check();
+  if(process.argv.includes('--qa-launcher'))await require('../tests/launcher-qa.cjs')({window,store,runner,updater,DATA,publish,resetIdentity:()=>{identityConfirmed=false;}});
+
   if (process.argv.includes('--qa')) {
     if(process.argv.includes('--qa-setup-file')){if(!store.state.profiles.length)store.create('Juan');publish();}
     if(process.argv.includes('--qa-setup-flow')){

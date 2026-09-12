@@ -42,6 +42,11 @@ class LocalStore {
     writeAtomic(path.join(dir, 'card1.mcd'), blankCard()); writeAtomic(path.join(dir, 'card2.mcd'), blankCard());
     this.state.profiles.push(profile); this.state.selected = profile.id; this.save(); return this.snapshot();
   }
+  login(name) {
+    name=String(name||'').trim().normalize('NFC');
+    const existing=this.state.profiles.find(p=>p.name.toLocaleLowerCase()===name.toLocaleLowerCase());
+    return existing?this.select(existing.id):this.create(name);
+  }
   select(id) { this.profile(id); this.state.selected = id; this.save(); return this.snapshot(); }
   settings(values) { this.state.settings = {...this.state.settings, ...values}; this.save(); return this.snapshot(); }
   backup(id = this.state.selected) {

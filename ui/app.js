@@ -13,6 +13,7 @@ function button(text, className, callback) { const el = node('button', text, cla
 function render(next) {
   state = next; const {local, network, game} = state; const me = local.profiles.find(p => p.id === local.selected);
   renderSetup(me);
+  window.renderLauncher?.(state);
   renderDecks(me, network, game);
   $('profiles').replaceChildren(...local.profiles.map(p => { const opt = node('option', p.name); opt.value = p.id; return opt; }));
   if (!me) $('profiles').append(node('option', 'Creá tu usuario')); else $('profiles').value = me.id;
@@ -96,6 +97,8 @@ document.addEventListener('keydown',event=>{if(event.key==='F1'){event.preventDe
 
 function renderSetup(me){
  const setup=state.setup||{},ready=setup.ready;
+ $('setup-heading').textContent=ready?'Tu juego ya está preparado.':'Tu juego, en tres pasos.';
+ $('setup-intro').textContent=ready?'La imagen está guardada y lista. Elegí campaña o multiplayer para continuar.':'Elegí tu nombre, agregá tu juego y empezá. Nosotros preparamos el resto.';
  if(!ready||!state.local.settings.onboardingDone)showPage('setup');
  for(const id of ['home','rooms'])document.querySelector('[data-page='+id+']').disabled=!ready;
  $('setup-profile-panel').hidden=!!me;
