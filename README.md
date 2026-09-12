@@ -1,38 +1,26 @@
-# Forbidden Memories · Amigos
+# Forbidden Memories Amigos
 
-Lanzador para Windows: perfiles locales sin contraseña, guía de teclado, tres mazos iniciales y salas online para dos amigos.
+Windows launcher with local profiles, virtual memory cards and online two-player rooms for Yu-Gi-Oh! Forbidden Memories Recompiled 0.5.9.
 
-**[Descargar el instalador](https://github.com/Jc-asastu/forbidden-memories-amigos/releases/latest)**
+## Play
+Download the latest installer from https://github.com/Jc-asastu/forbidden-memories-amigos/releases/latest . Create your name and add your own compatible USA BIN. The first preparation downloads a portable compiler and builds the native game locally. The installer does not contain a game disc or precompiled game engine.
 
-## Primer inicio
-1. Instalá y elegí tu nombre.
-2. Pulsá **+ Agregá acá tu imagen del juego** y seleccioná tu BIN USA compatible o su CUE.
-3. Esperá la preparación automática. La primera vez descarga aproximadamente210MB de herramientas y arma el juego localmente; puede tardar varios minutos y requiere variosGB de espacio libre. No necesitás instalar Python, compiladores ni configurar una memorycard.
-4. Elegí campaña o amigos. Las próximas aperturas son directas.
+Multiplayer opens a keyboard-driven salon: public rooms on the left, details and deck selection on the right. Use arrows and Enter, or mouse. Create a public room or check Private; private rooms use a code. Both players choose a deck and mark Ready; the leader starts the game. In the original game, the leader selects 2P DUEL, confirms the cards with Q and starts the rules with Enter. This last native menu transition is still manual in 0.5.0.
 
-El instalador no trae el disco ni un juego precompilado. Cada jugador aporta su propia copia. Los guardados y las herramientas quedan en LocalAppData/ForbiddenMemoriesAmigos.
+Each duel supports two players. A group of three can use the lobby, take turns or create another room. Three preset decks work without a campaign save. The preset balance is preliminary, not a measured win-rate guarantee. Campaign saves are kept separately.
 
-## Cómo se conectan
-1. Los dos usan esta misma versión.
-2. Uno pulsa **Salas online → Abrir salas para mis amigos** y comparte la dirección.
-3. El otro pega esa dirección y pulsa **Conectar**.
-4. Crean/entran a una sala pública; solamente las privadas usan código.
-5. Cada uno elige un mazo y pulsa **Estoy listo**; el anfitrión inicia el duelo.
-6. En el juego original, el anfitrión elige **2P DUEL**, confirma con **Q**, carga las partidas y pulsa **Enter** en las reglas. OPEN CARD muestra las cartas de ambos.
+## Hosting
+The friends group uses an automatic meeting address published in meeting.json. Juan's desktop app hosts the WebSocket server behind a temporary Cloudflare tunnel; no VPS or always-on hosting is deployed. Juan must open Multiplayer and keep the app, PC and internet running. Other players automatically discover the address and require no GitHub account. When the tunnel is restarted, the host publishes its new address.
 
-**La PC del anfitrión es el servidor.** Cloudflare crea un acceso temporal, sin abrir puertos del router. El lanzador debe permanecer abierto; al cerrarlo termina ese acceso. No hay VPS ni servidor permanente desplegado. La dirección puede cambiar al volver a abrirlo. La descarga en GitHub funciona aunque esa PC esté apagada.
+For self-hosting another group, change the repository constant in desktop/meeting.cjs. The publisher machine needs authenticated GitHub CLI and the local setting meetingPublisher=true; these credentials are never included in the installer. Ordinary players do not publish or receive credentials. server/index.cjs can also run standalone.
 
-## Teclado
-Flechas: moverse. **Q=cruz, W=cuadrado, E=círculo, R=triángulo. Enter=Start.** Retroceso=Select. A/S/D/F=L1/R1/L2/R2. Guía visual antes de jugar y en Controles/F1 del lanzador.
+## Controls and video
+Arrows move; Q cross, W square, E circle, R triangle; Enter Start, Backspace Select; A/S/D/F L1/R1/L2/R2. F1 in the launcher opens the illustrated guide.
 
-![Guía](assets/controls.svg)
+Version 0.5 fixes native pacing and VBlank at 1.3x for both peers; the speed control and manual turbo are disabled. Video settings include 1–4x internal resolution, nearest/bilinear presentation and textures, window/borderless/fullscreen, and optional presentation interpolation targeting 90–240 FPS. These targets depend on PC/monitor; interpolation can show artifacts. Original 2D artwork retains its original detail. OpenGL is used; experimental Vulkan is not offered as a recommended preset.
 
-## Desarrollo
-Node24 y Windowsx64. Ejecutá npm ci, npm run prepare:vendor, npm start. Para generar el instalador: npm run dist. Los archivos descargados se verifican con SHA256 y no se versionan. Para preparar el juego se usa el flujo oficial de generación local.
+## Development
+Node 24; npm ci; npm test; npm start. npm run prepare:vendor fetches pinned bootstrap tools. npm run dist builds NSIS. Native changes are applied locally by desktop/native-patch.cjs during preparation. Old native engines are rebuilt before they can join v0.5 games. No registry PATH modifications are made.
 
-Pruebas: npm test. Servidor independiente: npm run server (PORT8787, HOST0.0.0.0). También se incluye un Dockerfile para alojarlo por cuenta propia.
-
-## Alcance
-Primera versión para probar entre amigos. Salas y transporte probados con dos clientes; queda por validar la experiencia desde dos domicilios distintos. No hay reconexión automática de duelos interrumpidos. El balance de los tres mazos es inicial. Windows puede mostrar editor desconocido porque el instalador no está firmado comercialmente.
-
-El código original del lanzador es MIT; el motor base es de uso no comercial. Consultá [CREDITOS.md](CREDITOS.md) y las licencias de cada componente.
+## License
+Original launcher code is MIT. The upstream recompilation and its dependencies retain their own licenses, including PolyForm Noncommercial. See CREDITOS.md and the upstream NOTICE. This is an unofficial fan project.

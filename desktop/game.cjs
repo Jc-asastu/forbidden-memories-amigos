@@ -5,6 +5,7 @@ const {spawn} = require('node:child_process');
 const {EventEmitter} = require('node:events');
 const {writeAtomic} = require('./store.cjs');
 const {ensureKeyboard} = require('./keyboard.cjs');
+const {applyVideo}=require('./video.cjs');
 const {prepareDisc} = require('./disc.cjs');
 const EXE = 'Yu_Gi_Oh_Forbidden_Memories_Recompiled.exe';
 function gameEnvironment(extra = {}) {
@@ -32,6 +33,7 @@ class GameRunner extends EventEmitter {
   check() {
     const p = this.paths();
     if (!p.exe) throw new Error('Falta preparar el juego. Abrí Ajustes y elegí el ejecutable de la recompilación.');
+    if (!fs.existsSync(path.join(path.dirname(p.exe),'.amigos-runtime-v5'))) throw new Error('El motor necesita terminar la actualización antes de jugar.');
     if (!p.disc || !fs.existsSync(p.disc)) throw new Error('Elegí tu imagen de Forbidden Memories en Ajustes.');
     return p;
   }
@@ -42,6 +44,7 @@ class GameRunner extends EventEmitter {
     const saveDir = online ? online.saveDir : this.store.profileDir(profile.id);
     const disc = prepareDisc(p.disc, saveDir);
     const spec = launchSpec({...p, disc, saveDir, name: profile.name, online});
+    Object.assign(spec.options.env,applyVideo(saveDir,this.store.state.settings.video),{FM_AMIGOS_CONFIG_DIR:saveDir});
     const logPath = path.join(saveDir, 'last-game.log');
     writeAtomic(logPath, '');
     const child = spawn(spec.exe, spec.args, spec.options); this.child = child; this.mode = online ? 'online' : 'campaign';

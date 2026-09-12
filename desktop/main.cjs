@@ -11,6 +11,8 @@ const {startTunnel} = require('./tunnel.cjs');
 const {importImage,setupStatus,DISC_SHA1} = require('./setup.cjs');
 const {buildRuntime,cancelBuild} = require('./build-runtime.cjs');
 const {ensureKeyboard} = require('./keyboard.cjs');
+const {discover,publishMeeting}=require('./meeting.cjs');
+const {normalize}=require('./video.cjs');
 const {starterList} = require('../shared/starters.cjs');
 const {createBridge} = require('./relay.cjs');
 const {decodeOnlineCard, cardHash} = require('../shared/memory-card.cjs');
@@ -27,7 +29,7 @@ let store, runner, window, socket, localServer, tunnel, match, quitting = false;
 const setupJob={busy:false,stage:'',progress:0,error:''};
 const net = {connected: false, connecting: false, id: null, rooms: [], room: null, status: 'Sin conexión', hosting: false, addresses: [], internetUrl: '', openingInternet: false};
 const report = (message, kind = 'info') => { if (window && !window.isDestroyed()) window.webContents.send('notice', {message, kind}); };
-function snapshot() { return {local: store.snapshot(), network: net, game: {running: !!runner.child, mode: runner.mode, ...runner.paths()}, build: '0.5.9-amigos-0.4', starters: starterList(), setup: setupStatus(store,runner,setupJob)}; }
+function snapshot() { return {local: store.snapshot(), network: net, game: {running: !!runner.child, mode: runner.mode, ...runner.paths()}, build: '0.5.9-amigos-0.5', starters: starterList(), setup: setupStatus(store,runner,setupJob)}; }
 function publish() { if (window && !window.isDestroyed()) window.webContents.send('state', snapshot()); }
 function send(value) { if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error('Conectate al servidor de salas primero.'); socket.send(JSON.stringify(value)); }
 function endMatch(notifyServer = false) {
@@ -80,6 +82,15 @@ async function connect(url) {
     endMatch(false); socket = null; Object.assign(net, {connected: false, connecting: false, id: null, room: null, rooms: [], status: 'Sin conexión'}); publish();
   });
 }
+async function openMeeting(internet){
+ if(!localServer){const s=startServer({host:'127.0.0.1'});await s.ready;localServer=s;net.hosting=true;}
+ if(internet&&!net.internetUrl){net.openingInternet=true;net.status='Abriendo Multiplayer…';publish();
+ const vendor=fs.existsSync(path.join(process.resourcesPath,'vendor','cloudflared.exe'))?path.join(process.resourcesPath,'vendor'):path.join(ROOT,'vendor');
+ try{tunnel=startTunnel({exe:path.join(vendor,'cloudflared.exe'),port:8787,directory:path.join(DATA,'connection'),onExit:()=>{net.internetUrl='';tunnel=null;socket?.close();if(!quitting){net.status='Acceso interrumpido';report('El acceso online se cerró. Volvé a entrar a Multiplayer.','error');publish();}}});net.internetUrl=await tunnel.ready;
+ }finally{net.openingInternet=false;publish();}}
+ if(internet&&store.state.settings.meetingPublisher){net.status='Publicando salas para tus amigos…';publish();await publishMeeting(net.internetUrl);}
+ if(!net.connected)await connect('ws://127.0.0.1:8787');
+}
 async function prepareGame(file){
  if(setupJob.busy)throw Error('Esperá a que termine la preparación.');
  Object.assign(setupJob,{busy:true,error:'',stage:'Preparando tu juego…',progress:0});publish();
@@ -121,22 +132,16 @@ function register() {
         if (net.room) throw new Error('Salí de la sala online antes de abrir la campaña.'); if(!setupStatus(store,runner,setupJob).ready)throw Error('Completá los pasos de Inicio para preparar el juego.'); runner.start();
       } else if (action === 'connect') await connect(payload.url);
       else if (action === 'disconnect') { endMatch(true); socket?.close(); }
-      else if (action === 'host-server') {
-        if (!localServer) {
-          const server = startServer();
-          try { await server.ready; } catch (e) { throw new Error(`No se pudo abrir el servidor: ${e.message}`); }
-          localServer = server; net.hosting = true;
-          net.addresses = Object.values(os.networkInterfaces()).flat().filter(i => i.family === 'IPv4' && !i.internal).map(i => `${i.address}:8787`);
-        }
-        if (action === 'host-internet' && !net.internetUrl) {
-          net.openingInternet = true; publish();
-          const vendor = fs.existsSync(path.join(process.resourcesPath, 'vendor', 'cloudflared.exe')) ? path.join(process.resourcesPath, 'vendor') : path.join(ROOT, 'vendor');
-          try {
-            tunnel = startTunnel({exe: path.join(vendor, 'cloudflared.exe'), port: 8787, directory: path.join(DATA, 'connection'), onExit: () => { net.internetUrl = ''; tunnel = null; if (!quitting) { report('El acceso por internet se cerró. Tus amigos pueden volver a conectar cuando lo abras otra vez.', 'error'); publish(); } }});
-            net.internetUrl = await tunnel.ready;
-          } finally { net.openingInternet = false; publish(); }
-        }
-        await connect('ws://127.0.0.1:8787');
+      else if(action==='enter-multiplayer') {
+        if(!setupStatus(store,runner,setupJob).ready)throw Error('Primero prepará el juego.');
+        if(net.connected)return {ok:true,state:snapshot()};
+        if(net.openingInternet||net.connecting)return {ok:true,state:snapshot()};
+        if(store.state.settings.meetingPublisher)await openMeeting(true);
+        else {net.status='Buscando el punto de encuentro…';publish();try{await connect(await discover());}catch(e){net.status='Punto de encuentro apagado';publish();throw e;}}
+      } else if(action==='save-video') {
+        if(runner.child)throw Error('Cerrá el juego para aplicar los ajustes de video.');
+        store.settings({video:normalize(payload)});
+      } else if(action==='host-server'||action==='host-internet') {await openMeeting(action==='host-internet');
       } else if (action === 'create-room') { if (runner.child) throw new Error('Cerrá el juego primero.'); send({type: 'create', name: payload.name, private: payload.private === true}); }
       else if (action === 'join-room') { if (runner.child) throw new Error('Cerrá el juego primero.'); send({type: 'join', id: payload.id, code: payload.code}); }
       else if (action === 'leave-room') { endMatch(false); send({type: 'leave'}); }
@@ -144,7 +149,7 @@ function register() {
         if (runner.child) throw new Error('Cerrá la ventana del juego antes de prepararte.');
         runner.check();
         if (payload.ready === false) send({type: 'ready', ready: false});
-        else send({type: 'ready', card: store.onlineSave().toString('base64'), build: 'ygofm-0.5.9-amigos-v4-local', deckLabel: store.onlineDeckName()});
+        else send({type: 'ready', card: store.onlineSave().toString('base64'), build: 'ygofm-0.5.9-amigos-v5-fixed13', deckLabel: store.onlineDeckName()});
       } else if (action === 'start-match') send({type: 'start'});
       else if (action === 'refresh') send({type: 'list'});
       else if (action === 'copy-server') { if (net.internetUrl) clipboard.writeText(net.internetUrl); }
@@ -183,7 +188,9 @@ app.whenReady().then(async () => {
   register(); await window.loadFile(path.join(ROOT, 'ui', 'index.html'));
   if(process.argv.includes('--qa-setup-empty')){if(!process.env.FM_AMIGOS_DATA_DIR)throw Error('QA needs isolated data.');store.settings({discPath:'',discVerified:'',onboardingDone:false});}
   if(store.state.settings.discPath && (store.state.settings.discVerified!==DISC_SHA1||!fs.existsSync(store.state.settings.discPath))){try{await prepareGame(store.state.settings.discPath);}catch{}}
+  if(store.state.settings.discVerified===DISC_SHA1&&runner.paths().exe&&!fs.existsSync(path.join(path.dirname(runner.paths().exe),'.amigos-runtime-v5'))){try{Object.assign(setupJob,{busy:true,stage:'Actualizando tu juego…',progress:null});publish();const exe=await buildRuntime(ROOT,DATA,store.state.settings.discPath,p=>{Object.assign(setupJob,p);publish();});store.settings({gameExe:exe});}catch(e){setupJob.error=e.message;}finally{setupJob.busy=false;publish();}}
   publish();
+  if(process.argv.includes('--multiplayer')&&setupStatus(store,runner,setupJob).ready)await window.webContents.executeJavaScript("showPage('rooms')");
   if (process.argv.includes('--qa')) {
     if(process.argv.includes('--qa-setup-file')){if(!store.state.profiles.length)store.create('Juan');publish();}
     if(process.argv.includes('--qa-setup-flow')){
@@ -237,6 +244,7 @@ app.whenReady().then(async () => {
       await new Promise(resolve => runner.once('exit', resolve));
       publish();
     }
+    if(process.argv.includes('--qa-arena')) await require('../tests/arena-qa.cjs')({window,store,net,connect,DATA,publish});
     if(process.argv.includes('--qa-rooms')) {
       if(!process.env.FM_AMIGOS_DATA_DIR)throw Error('QA needs isolated data.');
       if(!store.state.profiles.length)store.create('Juan');

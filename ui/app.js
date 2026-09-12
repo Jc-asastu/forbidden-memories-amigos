@@ -7,7 +7,7 @@ async function action(name, payload) {
   try { const result = await window.amigos.action(name, payload); if (!result.ok) { notice(result.error, 'error'); return false; } if (result.state) render(result.state); return true; }
   catch { notice('No se pudo completar la acción.', 'error'); return false; }
 }
-function showPage(next) { page = next; for (const name of ['setup', 'home', 'rooms', 'settings']) $(`page-${name}`).hidden = name !== page; document.querySelectorAll('[data-page]').forEach(el => el.classList.toggle('active', el.dataset.page === page)); $('breadcrumb').textContent = {setup:'TODO LISTO, PASO A PASO', home: 'EL DUELO CONTINÚA', rooms: 'UN LUGAR PARA ENCONTRARSE', settings: 'TU JUEGO, A TU MANERA'}[page]; }
+function showPage(next) { page = next; document.body.classList.toggle('in-arena',next==='rooms');if(next==='rooms'&&window.enterArena)window.enterArena(); for (const name of ['setup', 'home', 'rooms', 'settings']) $(`page-${name}`).hidden = name !== page; document.querySelectorAll('[data-page]').forEach(el => el.classList.toggle('active', el.dataset.page === page)); $('breadcrumb').textContent = {setup:'TODO LISTO, PASO A PASO', home: 'EL DUELO CONTINÚA', rooms: 'UN LUGAR PARA ENCONTRARSE', settings: 'TU JUEGO, A TU MANERA'}[page]; }
 function node(tag, text, className) { const el = document.createElement(tag); if (text !== undefined) el.textContent = text; if (className) el.className = className; return el; }
 function button(text, className, callback) { const el = node('button', text, className); el.onclick = callback; return el; }
 function render(next) {
@@ -52,6 +52,7 @@ function render(next) {
     controls.append(button('Salir de la sala', 'link', () => action('leave-room'))); box.append(controls);
     box.append(node('p', r.state === 'preparing' ? 'Sincronizando las partidas…' : r.state === 'playing' ? 'Duelo abierto: el anfitrión entra a 2P DUEL, confirma la carga y pulsa Enter en las reglas. Elijan OPEN CARD para ver las cartas.' : 'Cada uno juega con el mazo que eligió arriba.', 'subtle'));
   }
+  if(window.renderArena)window.renderArena();
 }
 document.querySelectorAll('[data-page]').forEach(b => b.onclick = () => showPage(b.dataset.page));
 document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => b.closest('dialog').close());

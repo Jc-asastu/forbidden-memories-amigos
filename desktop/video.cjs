@@ -1,0 +1,6 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path');
+const presets={performance:{scale:1,filter:0,texture:0,fps:0},balanced:{scale:2,filter:1,texture:0,fps:0},hd:{scale:4,filter:1,texture:1,fps:0},fluid:{scale:2,filter:1,texture:1,fps:120}};
+function normalize(v={}){const p=presets[v.preset]||presets.balanced;return {preset:Object.hasOwn(presets,v.preset)?v.preset:'balanced',scale:[1,2,3,4].includes(v.scale)?v.scale:p.scale,filter:[0,1].includes(v.filter)?v.filter:p.filter,texture:[0,1].includes(v.texture)?v.texture:p.texture,fps:[0,90,120,144,165,240].includes(v.fps)?v.fps:p.fps,screen:[0,1,2].includes(v.screen)?v.screen:0};}
+function applyVideo(saveDir,value){const v=normalize(value),p=path.join(saveDir,'menu_settings.ini');let s=fs.existsSync(p)?fs.readFileSync(p,'utf8'):'';const values={renderer:1,supersampling:v.scale,present_filter:v.filter,texture_filter:v.texture,screen:v.screen,scaling:0,speed:1,speed_governor:0,fast_loads:0,update_check:0};for(const [key,n] of Object.entries(values)){const re=new RegExp('^'+key+'=.*$','m');s=re.test(s)?s.replace(re,key+'='+n):s+'\n'+key+'='+n;}fs.writeFileSync(p,s+'\n');return {PSX_FRAME_INTERPOLATION:v.fps?'1':'0',PSX_FRAME_INTERPOLATION_FPS:String(v.fps),PSX_LOW_LATENCY_INPUT:'1'};}
+module.exports={normalize,applyVideo,presets};

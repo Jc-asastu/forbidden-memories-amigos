@@ -24,5 +24,5 @@ async function importImage(file,root,onProgress=()=>{}){
   await fs.promises.rename(temporary,target);onProgress({stage:'Juego listo',progress:100});return {discPath:target,discVerified:DISC_SHA1};
  }catch(e){await fs.promises.rm(temporary,{force:true}).catch(()=>{});if(e.code==='ENOSPC')throw Error('Falta espacio para preparar el juego. Liberá al menos 600 MB y probá de nuevo.');throw e;}
 }
-function setupStatus(store,runner,job){const me=store.state.profiles.find(p=>p.id===store.state.selected),s=store.state.settings;const gameReady=s.discVerified===DISC_SHA1&&!!s.discPath&&fs.existsSync(s.discPath)&&!!runner.paths().exe;return {...job,hasProfile:!!me,gameReady,ready:!!me&&gameReady&&!job.busy};}
+function setupStatus(store,runner,job){const me=store.state.profiles.find(p=>p.id===store.state.selected),s=store.state.settings;const gameReady=s.discVerified===DISC_SHA1&&!!s.discPath&&fs.existsSync(s.discPath)&&!!runner.paths().exe&&fs.existsSync(path.join(path.dirname(runner.paths().exe),'.amigos-runtime-v5'));return {...job,hasProfile:!!me,gameReady,ready:!!me&&gameReady&&!job.busy};}
 module.exports={importImage,resolveImage,setupStatus,DISC_SIZE,DISC_SHA1};
