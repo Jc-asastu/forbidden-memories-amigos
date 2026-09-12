@@ -50,7 +50,7 @@ function render(next) {
     const ready = button(self?.ready ? 'Cancelar listo' : 'Estoy listo', 'secondary', () => action('ready', {ready: !self?.ready})); ready.disabled = r.state !== 'waiting' || game.running; controls.append(ready);
     if (r.hostId === network.id) { const start = button('Iniciar duelo', 'primary', () => action('start-match')); start.disabled = r.players.length !== 2 || !r.players.every(p => p.ready) || r.state !== 'waiting'; controls.append(start); }
     controls.append(button('Salir de la sala', 'link', () => action('leave-room'))); box.append(controls);
-    box.append(node('p', r.state === 'preparing' ? 'Sincronizando las partidas…' : r.state === 'playing' ? 'Duelo abierto: el anfitrión entra a 2P DUEL, confirma la carga y pulsa Enter en las reglas. Elijan OPEN CARD para ver las cartas.' : 'Cada uno juega con el mazo que eligió arriba.', 'subtle'));
+    box.append(node('p', r.state === 'preparing' ? 'Sincronizando las partidas…' : r.state === 'playing' ? (state.game.bootStage || 'Duelo en curso. Los controles están en la ventana del juego.') : 'Cada uno juega con el mazo que eligió arriba.', 'subtle'));
   }
   if(window.renderArena)window.renderArena();
 }

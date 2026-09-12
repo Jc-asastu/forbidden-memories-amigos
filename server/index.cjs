@@ -4,7 +4,7 @@ const {randomUUID, randomInt} = require('node:crypto');
 const {WebSocketServer, WebSocket} = require('ws');
 const {decodeOnlineCard, cardHash} = require('../shared/memory-card.cjs');
 const PROTOCOL = 1;
-function startServer({port = 8787, host = '0.0.0.0', prepareTimeout = 90000} = {}) {
+function startServer({port = 8787, host = '0.0.0.0', prepareTimeout = 90000, duelTimeout = 190000} = {}) {
   const rooms = new Map(); const clients = new Set();
   const httpServer = http.createServer((req, res) => {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -21,7 +21,7 @@ function startServer({port = 8787, host = '0.0.0.0', prepareTimeout = 90000} = {
   function update(r) { for (const c of r.members) send(c.ws, {type: 'room', room: publicRoom(r, true)}); broadcastList(); }
   function cancel(r, reason) {
     clearTimeout(r.timer); r.state = 'waiting'; r.session = null;
-    for (const c of r.members) { c.ready = false; c.card = null; c.prepared = false; send(c.ws, {type: 'match-ended', reason}); }
+    for (const c of r.members) { c.ready = false; c.card = null; c.prepared = false; c.inDuel=false; send(c.ws, {type: 'match-ended', reason}); }
   }
   function leave(c) {
     if (!c.room) return;
@@ -60,7 +60,7 @@ function startServer({port = 8787, host = '0.0.0.0', prepareTimeout = 90000} = {
           if (c.id) throw new Error('Ya estás conectado.');
           if (m.protocol !== PROTOCOL) throw new Error('Las versiones de la aplicación no coinciden.');
           c.name = text(m.name, 24, 'Jugador'); c.id = randomUUID();
-          send(ws, {type: 'welcome', id: c.id, protocol: PROTOCOL}); send(ws, {type: 'rooms', rooms: listing()}); return;
+          send(ws, {type: 'welcome', id: c.id, protocol: PROTOCOL, directDuel: true}); send(ws, {type: 'rooms', rooms: listing()}); return;
         }
         if (!c.id) throw new Error('Elegí un usuario para entrar.');
         if (m.type === 'list') { send(ws, {type: 'rooms', rooms: listing()}); return; }
@@ -94,18 +94,19 @@ function startServer({port = 8787, host = '0.0.0.0', prepareTimeout = 90000} = {
           if (r.members[0] !== c) throw new Error('El creador de la sala inicia el duelo.');
           if (r.state !== 'waiting' || r.members.length !== 2 || !r.members.every(p => p.ready && p.card)) throw new Error('Los dos jugadores tienen que estar listos.');
           if (r.members[0].build !== r.members[1].build) throw new Error('Ambos necesitan la misma versión del juego.');
-          r.state = 'preparing'; r.session = randomInt(1, 0x7fffffff);
+          r.state = 'preparing'; r.duelStarted=false; r.session = randomInt(1, 0x7fffffff);
           const cards = r.members.map(p => p.card.toString('base64')); const hashes = r.members.map(p => cardHash(p.card));
-          r.members.forEach((p, slot) => { p.prepared = false; send(p.ws, {type: 'prepare', session: r.session, slot, cards, hashes}); });
+          r.members.forEach((p, slot) => { p.prepared = false; p.inDuel=false; send(p.ws, {type: 'prepare', session: r.session, slot, cards, hashes}); });
           r.timer = setTimeout(() => { if (r.state === 'preparing') { cancel(r, 'Se agotó el tiempo para preparar el juego.'); update(r); } }, prepareTimeout); r.timer.unref();
           update(r); return;
         }
         if (m.type === 'prepared') {
           if (r.state !== 'preparing' || m.session !== r.session) throw new Error('La sesión ya no está disponible.');
           c.prepared = true;
-          if (r.members.every(p => p.prepared)) { clearTimeout(r.timer); r.state = 'playing'; for (const p of r.members) send(p.ws, {type: 'launch', session: r.session}); update(r); }
+          if (r.members.every(p => p.prepared)) { clearTimeout(r.timer); r.state = 'playing'; if(r.members.every(p=>p.build.endsWith('-direct'))){r.timer=setTimeout(()=>{if(r.state==='playing'&&!r.members.every(p=>p.inDuel)){cancel(r,'No se pudo completar la carga del primer turno. Volvé a intentarlo.');update(r);}},duelTimeout);r.timer.unref();} for (const p of r.members) send(p.ws, {type: 'launch', session: r.session}); update(r); }
           return;
         }
+        if(m.type==='duel-ready'){if(r.state!=='playing'||m.session!==r.session)throw Error('La sesión ya no está disponible.');c.inDuel=true;if(!r.duelStarted&&r.members.length===2&&r.members.every(p=>p.inDuel)){r.duelStarted=true;clearTimeout(r.timer);for(const p of r.members)send(p.ws,{type:'duel-go',session:r.session});}return;}
         if (m.type === 'end') { if (r.state !== 'waiting') { cancel(r, 'La sesión terminó. Tu partida local está conservada.'); update(r); } return; }
         throw new Error('Acción desconocida.');
       } catch (error) { send(ws, {type: 'error', message: error.message}); }

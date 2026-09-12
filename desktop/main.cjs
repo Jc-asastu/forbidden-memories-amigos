@@ -31,7 +31,7 @@ const setupJob={busy:false,stage:'',progress:0,error:''};
 const net = {connected: false, connecting: false, id: null, rooms: [], room: null, status: 'Sin conexión', hosting: false, addresses: [], internetUrl: '', openingInternet: false};
 const report = (message, kind = 'info') => { if (window && !window.isDestroyed()) window.webContents.send('notice', {message, kind}); };
 function heavyData(){return storagePath(store.state.settings,DATA,{packaged:app.isPackaged});}
-function snapshot() { return {local: store.snapshot(), network: net, game: {running: !!runner.child, mode: runner.mode, ...runner.paths()}, build: '0.5.9-amigos-0.5', starters: starterList(), setup: {...setupStatus(store,runner,setupJob),storage:spaceInfo(heavyData())}}; }
+function snapshot() { return {local: store.snapshot(), network: net, game: {running: !!runner.child, mode: runner.mode, bootStage: runner.bootStage || '', ...runner.paths()}, build: '0.5.9-amigos-0.6', starters: starterList(), setup: {...setupStatus(store,runner,setupJob),storage:spaceInfo(heavyData())}}; }
 function publish() { if (window && !window.isDestroyed()) window.webContents.send('state', snapshot()); }
 function send(value) { if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error('Conectate al servidor de salas primero.'); socket.send(JSON.stringify(value)); }
 function endMatch(notifyServer = false) {
@@ -41,11 +41,12 @@ function endMatch(notifyServer = false) {
 async function message(data, binary) {
   if (binary) { match?.bridge?.receive(data); return; }
   const m = JSON.parse(data.toString());
+  if(m.type==='welcome'&&!m.directDuel){socket?.close();report('El anfitrión debe actualizar a la versión 0.6.0 para iniciar duelos directos.','error');return;}
   if (m.type === 'welcome') { net.id = m.id; net.connected = true; net.connecting = false; net.status = 'Conectado'; }
   if (m.type === 'rooms') net.rooms = m.rooms;
   if (m.type === 'room') net.room = m.room;
   if (m.type === 'error') report(m.message, 'error');
-  if (m.type === 'match-ended') { endMatch(false); report(m.reason); }
+  if (m.type === 'match-ended') { endMatch(false); net.status = 'Listo para otro duelo'; report(m.reason); }
   if (m.type === 'prepare') {
     if (runner.child || match) throw new Error('Ya hay una partida abierta.');
     runner.check();
@@ -62,10 +63,10 @@ async function message(data, binary) {
   }
   if (m.type === 'launch') {
     if (!match || match.session !== m.session) throw new Error('La sesión ya no está disponible.');
-    runner.start({...match, bind: match.bridge.bind, peer: match.bridge.peer});
-    net.status = 'Duelo abierto';
-    report('En el menú original, elegí 2P DUEL. El creador usa el primer jugador y su amigo el segundo.');
+    await runner.start({...match, bind: match.bridge.bind, peer: match.bridge.peer});
+    net.status = 'Cargando el primer turno…';
   }
+  if(m.type==='duel-go'&&match?.session===m.session){await runner.revealDuel();net.status='Duelo en curso';}
   publish();
 }
 async function connect(url) {
@@ -141,7 +142,7 @@ function register() {
         store.setOnlineDeck(payload.id);
         if (net.room?.players.find(p => p.id === net.id)?.ready) send({type: 'ready', ready: false});
       } else if (action === 'campaign') {
-        if (net.room) throw new Error('Salí de la sala online antes de abrir la campaña.'); if(!setupStatus(store,runner,setupJob).ready)throw Error('Completá los pasos de Inicio para preparar el juego.'); runner.start();
+        if (net.room) throw new Error('Salí de la sala online antes de abrir la campaña.'); if(!setupStatus(store,runner,setupJob).ready)throw Error('Completá los pasos de Inicio para preparar el juego.'); await runner.start();
       } else if (action === 'connect') await connect(payload.url);
       else if (action === 'disconnect') { endMatch(true); socket?.close(); }
       else if(action==='enter-multiplayer') {
@@ -161,7 +162,7 @@ function register() {
         if (runner.child) throw new Error('Cerrá la ventana del juego antes de prepararte.');
         runner.check();
         if (payload.ready === false) send({type: 'ready', ready: false});
-        else send({type: 'ready', card: store.onlineSave().toString('base64'), build: 'ygofm-0.5.9-amigos-v5-fixed13', deckLabel: store.onlineDeckName()});
+        else send({type: 'ready', card: store.onlineSave().toString('base64'), build: 'ygofm-0.5.9-amigos-v6-direct', deckLabel: store.onlineDeckName()});
       } else if (action === 'start-match') send({type: 'start'});
       else if (action === 'refresh') send({type: 'list'});
       else if (action === 'copy-server') { if (net.internetUrl) clipboard.writeText(net.internetUrl); }
@@ -184,6 +185,8 @@ app.whenReady().then(async () => {
   runner = new GameRunner(store, ROOT);
   runner.on('problem', text => report(text, 'error'));
   runner.on('started', publish);
+  runner.on('boot-stage',stage=>{net.status=stage;publish();});
+  runner.on('duel-ready',({session})=>{if(match?.session===session)send({type:'duel-ready',session});});
   runner.on('exit', e => { if (e.mode === 'online') endMatch(true); if (e.code && !e.signal) report('El juego se cerró con un error. Se conservó el registro junto al guardado.', 'error'); publish(); });
   window = new BrowserWindow({width: 1160, height: 800, minWidth: 880, minHeight: 640, title: 'Forbidden Memories · Amigos', icon: path.join(ROOT, 'assets', 'app.ico'), backgroundColor: '#141019', autoHideMenuBar: true, show: !process.argv.includes('--qa'), webPreferences: {preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: !process.argv.includes('--qa')}});
   window.webContents.setWindowOpenHandler(() => ({action: 'deny'}));

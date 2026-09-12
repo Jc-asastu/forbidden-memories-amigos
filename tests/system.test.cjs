@@ -130,3 +130,23 @@ test('fresh profiles can use all three genuine 40-card decks without altering ca
  test('setup rejects bad images and preserves an already installed game on checksum failure',async t=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'fm-setup-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));const {importImage,DISC_SIZE}=require('../desktop/setup.cjs');const invalid=path.join(root,'bad.bin');fs.writeFileSync(invalid,'bad');await assert.rejects(importImage(invalid,root),/USA compatible/);await assert.rejects(importImage(path.join(root,'missing.bin'),root),/No encontramos/);const cue=path.join(root,'bad.cue');fs.writeFileSync(cue,'FILE "first.bin" BINARY\nFILE "second.bin" BINARY');await assert.rejects(importImage(cue,root),/directamente/);const library=path.join(root,'library');fs.mkdirSync(library);const target=path.join(library,'Forbidden Memories (USA).bin');fs.writeFileSync(target,'previous installation');const fd=fs.openSync(invalid,'w');fs.ftruncateSync(fd,DISC_SIZE);fs.closeSync(fd);await assert.rejects(importImage(invalid,root),/no coincide/);assert.equal(fs.readFileSync(target,'utf8'),'previous installation');assert.deepEqual(fs.readdirSync(library),['Forbidden Memories (USA).bin']);
  });
+
+test('direct duel reveal waits for both first-turn reports and rejects stale sessions', async t=>{
+ const server=startServer({port:0,host:'127.0.0.1'});const {port}=await server.ready;const a=new Peer('ws://127.0.0.1:'+port,'Direct A'),b=new Peer('ws://127.0.0.1:'+port,'Direct B');t.after(async()=>{a.close();b.close();await server.close();});await Promise.all([a.open,b.open]);a.send({type:'create',name:'Direct'});const room=(await a.next('room')).room;b.send({type:'join',id:room.id});await b.next('room',m=>m.room.players.length===2);for(const p of [a,b])p.send({type:'ready',card:fixture().toString('base64'),build:'test-direct'});await a.next('room',m=>m.room.players.every(p=>p.ready));a.send({type:'start'});const prep=await a.next('prepare');await b.next('prepare');for(const p of [a,b])p.send({type:'prepared',session:prep.session});await Promise.all([a.next('launch'),b.next('launch')]);a.send({type:'duel-ready',session:prep.session+1});await a.next('error');a.send({type:'duel-ready',session:prep.session});await new Promise(r=>setTimeout(r,100));assert(!a.messages.some(m=>m.type==='duel-go'));b.send({type:'duel-ready',session:prep.session});const go=await Promise.all([a.next('duel-go'),b.next('duel-go')]);assert(go.every(m=>m.session===prep.session));
+ a.send({type:'duel-ready',session:prep.session});b.send({type:'duel-ready',session:prep.session});await new Promise(r=>setTimeout(r,100));assert(!a.messages.some(m=>m.type==='duel-go'));assert(!b.messages.some(m=>m.type==='duel-go'));
+});
+
+test('unfinished direct load returns both players to a retryable room',async t=>{
+ const server=startServer({port:0,host:'127.0.0.1',duelTimeout:100});const {port}=await server.ready;
+ const a=new Peer('ws://127.0.0.1:'+port,'A'),b=new Peer('ws://127.0.0.1:'+port,'B');
+ t.after(async()=>{a.close();b.close();await server.close();});await Promise.all([a.open,b.open]);
+ a.send({type:'create',name:'Timeout'});const room=(await a.next('room')).room;b.send({type:'join',id:room.id});await b.next('room');
+ for(const p of [a,b])p.send({type:'ready',card:fixture().toString('base64'),build:'test-direct'});
+ await a.next('room',m=>m.room?.players.length===2&&m.room.players.every(p=>p.ready));a.send({type:'start'});
+ const prep=await a.next('prepare');await b.next('prepare');for(const p of [a,b])p.send({type:'prepared',session:prep.session});
+ await Promise.all([a.next('launch'),b.next('launch')]);a.send({type:'duel-ready',session:prep.session});
+ for(const p of [a,b])assert.match((await p.next('match-ended')).reason,/primer turno/);
+ const reset=(await a.next('room',m=>m.room?.state==='waiting'&&m.room.players.every(p=>!p.ready))).room;
+ assert.equal(reset.id,room.id);a.send({type:'duel-ready',session:prep.session});await a.next('error');
+ assert(!a.messages.some(m=>m.type==='duel-go'));
+});
