@@ -27,7 +27,11 @@
     System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", t "1") i.r0'
     nsExec::ExecToLog '"$R8\${APP_EXECUTABLE_FILENAME}" "$PLUGINSDIR\preserve-data.cjs" "$R8" "$LOCALAPPDATA\ForbiddenMemoriesAmigos"'
     Pop $R6
-    System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", t R7) i.r0'
+    ${If} $R7 == ""
+      System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", p 0) i.r0'
+    ${Else}
+      System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", t "$R7") i.r0'
+    ${EndIf}
     ${If} $R6 != 0
       MessageBox MB_OK|MB_ICONSTOP "No se pudo proteger tu juego y tus partidas. La actualización se canceló. Cerrá el juego y volvé a intentar." /SD IDOK
       SetErrorLevel 2
