@@ -1,0 +1,10 @@
+node_modules/
+runtime/
+data/
+dist/
+*.log
+local-install.json
+vendor/*.exe
+vendor/*.zip
+work/
+outputs/
