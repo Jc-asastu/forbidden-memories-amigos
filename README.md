@@ -14,6 +14,9 @@ The friends group uses an automatic meeting address published in meeting.json. J
 
 For self-hosting another group, change the repository constant in desktop/meeting.cjs. The publisher machine needs authenticated GitHub CLI and the local setting meetingPublisher=true; these credentials are never included in the installer. Ordinary players do not publish or receive credentials. server/index.cjs can also run standalone.
 
+## Storage (0.5.1)
+Before adding the BIN, use Cambiar carpeta / disco to select the drive with space. The game image, compiler download, unpacked tools, build output and child-process temporary files all use that location. Reserve 4 GiB free for first preparation. Fresh installs default to GameData next to the installed app. Existing working installations keep their location; changing the preparation destination preserves profiles and saves. Failed old preparation files are not automatically deleted. The small profile index and save data still live in LocalAppData. Version 0.5.1 remains multiplayer-compatible with 0.5.0.
+
 ## Controls and video
 Arrows move; Q cross, W square, E circle, R triangle; Enter Start, Backspace Select; A/S/D/F L1/R1/L2/R2. F1 in the launcher opens the illustrated guide.
 

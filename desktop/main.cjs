@@ -10,6 +10,7 @@ const {installRuntime} = require('./install.cjs');
 const {startTunnel} = require('./tunnel.cjs');
 const {importImage,setupStatus,DISC_SHA1} = require('./setup.cjs');
 const {buildRuntime,cancelBuild} = require('./build-runtime.cjs');
+const {storagePath,spaceInfo,checkSpace}=require('./storage.cjs');
 const {ensureKeyboard} = require('./keyboard.cjs');
 const {discover,publishMeeting}=require('./meeting.cjs');
 const {normalize}=require('./video.cjs');
@@ -29,7 +30,8 @@ let store, runner, window, socket, localServer, tunnel, match, quitting = false;
 const setupJob={busy:false,stage:'',progress:0,error:''};
 const net = {connected: false, connecting: false, id: null, rooms: [], room: null, status: 'Sin conexión', hosting: false, addresses: [], internetUrl: '', openingInternet: false};
 const report = (message, kind = 'info') => { if (window && !window.isDestroyed()) window.webContents.send('notice', {message, kind}); };
-function snapshot() { return {local: store.snapshot(), network: net, game: {running: !!runner.child, mode: runner.mode, ...runner.paths()}, build: '0.5.9-amigos-0.5', starters: starterList(), setup: setupStatus(store,runner,setupJob)}; }
+function heavyData(){return storagePath(store.state.settings,DATA,{packaged:app.isPackaged});}
+function snapshot() { return {local: store.snapshot(), network: net, game: {running: !!runner.child, mode: runner.mode, ...runner.paths()}, build: '0.5.9-amigos-0.5', starters: starterList(), setup: {...setupStatus(store,runner,setupJob),storage:spaceInfo(heavyData())}}; }
 function publish() { if (window && !window.isDestroyed()) window.webContents.send('state', snapshot()); }
 function send(value) { if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error('Conectate al servidor de salas primero.'); socket.send(JSON.stringify(value)); }
 function endMatch(notifyServer = false) {
@@ -94,14 +96,24 @@ async function openMeeting(internet){
 async function prepareGame(file){
  if(setupJob.busy)throw Error('Esperá a que termine la preparación.');
  Object.assign(setupJob,{busy:true,error:'',stage:'Preparando tu juego…',progress:0});publish();
- try{const settings=await importImage(file,DATA,progress=>{Object.assign(setupJob,progress);publish();});
- const exe=await buildRuntime(ROOT,DATA,settings.discPath,progress=>{Object.assign(setupJob,progress);publish();});ensureKeyboard(exe);store.settings({...settings,gameExe:exe});
+ try{const destination=heavyData();store.settings({setupSource:file});checkSpace(destination);const settings=await importImage(file,destination,progress=>{Object.assign(setupJob,progress);publish();});
+ const exe=await buildRuntime(ROOT,destination,settings.discPath,progress=>{Object.assign(setupJob,progress);publish();});ensureKeyboard(exe);store.settings({...settings,gameExe:exe,setupSource:''});
  }catch(e){setupJob.error=e.message;throw e;}finally{setupJob.busy=false;publish();}
 }
 function register() {
   ipcMain.handle('action', async (event, action, payload = {}) => {
     if (event.sender !== window.webContents) throw new Error('Unknown window');
     try {
+      if(action==='choose-storage'){
+        if(runner.child||net.room||setupJob.busy)throw Error('Esperá a que termine la preparación o cerrá el juego antes de cambiar la carpeta.');
+        const selected=await dialog.showOpenDialog(window,{title:'Elegí el disco para las descargas y el juego',defaultPath:heavyData(),properties:['openDirectory','createDirectory']});
+        if(!selected.canceled){const destination=path.join(selected.filePaths[0],'ForbiddenMemoriesAmigos-GameData');checkSpace(destination);store.settings({storagePath:destination});setupJob.error='';publish();}
+        return {ok:true,state:snapshot()};
+      }
+      if(action==='retry-setup'){
+        if(runner.child||net.connected||setupJob.busy)throw Error('Cerrá el juego y desconectate antes de preparar.');
+        const source=store.state.settings.setupSource||store.state.settings.discPath;if(!source)throw Error('Agregá tu imagen del juego con el botón +.');await prepareGame(source);return {ok:true,state:snapshot()};
+      }
       if(action==='complete-setup'){if(!setupStatus(store,runner,setupJob).ready)throw Error('Primero agregá tu nombre y el juego.');store.settings({onboardingDone:true});publish();return {ok:true,state:snapshot()};}
       if(action==='choose-disc'){
         if(runner.child||net.connected||net.connecting||setupJob.busy)throw Error('Cerrá el juego y desconectate antes de cambiar la imagen.');
@@ -188,7 +200,7 @@ app.whenReady().then(async () => {
   register(); await window.loadFile(path.join(ROOT, 'ui', 'index.html'));
   if(process.argv.includes('--qa-setup-empty')){if(!process.env.FM_AMIGOS_DATA_DIR)throw Error('QA needs isolated data.');store.settings({discPath:'',discVerified:'',onboardingDone:false});}
   if(store.state.settings.discPath && (store.state.settings.discVerified!==DISC_SHA1||!fs.existsSync(store.state.settings.discPath))){try{await prepareGame(store.state.settings.discPath);}catch{}}
-  if(store.state.settings.discVerified===DISC_SHA1&&runner.paths().exe&&!fs.existsSync(path.join(path.dirname(runner.paths().exe),'.amigos-runtime-v5'))){try{Object.assign(setupJob,{busy:true,stage:'Actualizando tu juego…',progress:null});publish();const exe=await buildRuntime(ROOT,DATA,store.state.settings.discPath,p=>{Object.assign(setupJob,p);publish();});store.settings({gameExe:exe});}catch(e){setupJob.error=e.message;}finally{setupJob.busy=false;publish();}}
+  if(store.state.settings.discVerified===DISC_SHA1&&runner.paths().exe&&!fs.existsSync(path.join(path.dirname(runner.paths().exe),'.amigos-runtime-v5'))){try{Object.assign(setupJob,{busy:true,stage:'Actualizando tu juego…',progress:null});publish();const destination=heavyData();checkSpace(destination);const exe=await buildRuntime(ROOT,destination,store.state.settings.discPath,p=>{Object.assign(setupJob,p);publish();});store.settings({gameExe:exe});}catch(e){setupJob.error=e.message;}finally{setupJob.busy=false;publish();}}
   publish();
   if(process.argv.includes('--multiplayer')&&setupStatus(store,runner,setupJob).ready)await window.webContents.executeJavaScript("showPage('rooms')");
   if (process.argv.includes('--qa')) {
@@ -243,6 +255,20 @@ app.whenReady().then(async () => {
       runner.child.kill();
       await new Promise(resolve => runner.once('exit', resolve));
       publish();
+    }
+    if(process.argv.includes('--qa-storage')) {
+      if(!process.env.FM_AMIGOS_DATA_DIR)throw Error('QA requires isolated storage');
+      if(!store.state.profiles.length)store.create('Amigo almacenamiento');publish();
+      const oldPicker=dialog.showOpenDialog;const before=JSON.stringify(store.state.profiles);
+      try{
+        const original=store.state.settings.storagePath;dialog.showOpenDialog=async()=>({canceled:true,filePaths:[]});await window.webContents.executeJavaScript("action('choose-storage')");if(store.state.settings.storagePath!==original)throw Error('Cancel changed folder');
+        const target=path.join(DATA,'otro disco con espacio');fs.mkdirSync(target,{recursive:true});dialog.showOpenDialog=async()=>({canceled:false,filePaths:[target]});await window.webContents.executeJavaScript("action('choose-storage')");if(heavyData()!==path.join(target,'ForbiddenMemoriesAmigos-GameData'))throw Error('Folder not selected');
+        const invalid=path.join(DATA,'invalid.bin');fs.writeFileSync(invalid,'invalid');store.settings({setupSource:invalid});await window.webContents.executeJavaScript("action('retry-setup')");if(!setupJob.error||setupJob.busy)throw Error('Retry failure not recoverable');
+        if(before!==JSON.stringify(store.state.profiles))throw Error('Profiles changed');
+        if(!await window.webContents.executeJavaScript("document.getElementById('choose-storage').getClientRects().length>0 && !document.getElementById('choose-storage').disabled && !document.getElementById('retry-setup').hidden"))throw Error('Recovery controls hidden');
+        const reread=new LocalStore(DATA);if(reread.state.settings.storagePath!==heavyData())throw Error('Folder not persistent');
+        fs.writeFileSync(path.join(DATA,'storage-result.json'),JSON.stringify({pickerCancelSafe:true,chosenFolder:true,persists:true,retryRecoverable:true,profilePreserved:true,recoveryButtonsVisible:true}));
+      }finally{dialog.showOpenDialog=oldPicker;}
     }
     if(process.argv.includes('--qa-arena')) await require('../tests/arena-qa.cjs')({window,store,net,connect,DATA,publish});
     if(process.argv.includes('--qa-rooms')) {

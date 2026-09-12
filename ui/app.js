@@ -102,6 +102,7 @@ function renderSetup(me){
  $('setup-game-panel').hidden=!me||setup.gameReady&&!setup.busy&&!setup.error;
  $('setup-ready-panel').hidden=!ready;
  $('setup-add-game').hidden=setup.busy;
+ const disk=setup.storage||{};$('storage-path').textContent=disk.path||'';$('storage-space').textContent=(disk.freeBytes==null?'Espacio no disponible':(disk.freeBytes/1024**3).toFixed(1)+' GB libres')+' · Reservá 4 GB para la preparación inicial';$('choose-storage').disabled=setup.busy||state.game.running;$('retry-setup').hidden=setup.busy||!state.local.settings.setupSource&&!state.local.settings.discPath||setup.gameReady;
  $('setup-progress').hidden=!setup.busy;
  $('setup-stage').textContent=setup.stage||'Preparando…';$('setup-percent').textContent=setup.progress==null?'En progreso…':setup.progress+'%';if(setup.progress==null)$('setup-progress-bar').removeAttribute('value');else $('setup-progress-bar').value=setup.progress||0;
  $('setup-error').hidden=!setup.error;$('setup-error').textContent=setup.error||'';
@@ -116,3 +117,5 @@ $('setup-add-game').onclick=()=>action('choose-disc');$('setup-change-game').onc
 $('setup-controls').onclick=()=>showControls();
 $('setup-campaign').onclick=async()=>{if(await action('complete-setup')){showPage('home');await action('campaign');}};
 $('setup-online').onclick=async()=>{if(await action('complete-setup'))showPage('rooms');};
+
+$('choose-storage').onclick=()=>action('choose-storage');$('retry-setup').onclick=()=>action('retry-setup');

@@ -22,7 +22,7 @@ async function importImage(file,root,onProgress=()=>{}){
   await pipeline(fs.createReadStream(source),new Transform({transform(chunk,encoding,callback){hash.update(chunk);received+=chunk.length;const progress=Math.min(99,Math.floor(received/DISC_SIZE*100));if(progress!==last){last=progress;onProgress({stage:'Comprobando y guardando tu juego…',progress});}callback(null,chunk);}}),fs.createWriteStream(temporary,{flags:'wx'}));
   if(received!==DISC_SIZE||hash.digest('hex')!==DISC_SHA1)throw Error('El archivo no coincide con la versión USA compatible. No se modificó tu instalación anterior.');
   await fs.promises.rename(temporary,target);onProgress({stage:'Juego listo',progress:100});return {discPath:target,discVerified:DISC_SHA1};
- }catch(e){await fs.promises.rm(temporary,{force:true}).catch(()=>{});if(e.code==='ENOSPC')throw Error('Falta espacio para preparar el juego. Liberá al menos 600 MB y probá de nuevo.');throw e;}
+ }catch(e){await fs.promises.rm(temporary,{force:true}).catch(()=>{});if(e.code==='ENOSPC')throw Error('El disco elegido se quedó sin espacio al copiar el juego. Tocá «Cambiar carpeta / disco» y reintentá en otro disco.');throw e;}
 }
 function setupStatus(store,runner,job){const me=store.state.profiles.find(p=>p.id===store.state.selected),s=store.state.settings;const gameReady=s.discVerified===DISC_SHA1&&!!s.discPath&&fs.existsSync(s.discPath)&&!!runner.paths().exe&&fs.existsSync(path.join(path.dirname(runner.paths().exe),'.amigos-runtime-v5'));return {...job,hasProfile:!!me,gameReady,ready:!!me&&gameReady&&!job.busy};}
 module.exports={importImage,resolveImage,setupStatus,DISC_SIZE,DISC_SHA1};
