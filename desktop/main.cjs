@@ -31,7 +31,7 @@ const setupJob={busy:false,stage:'',progress:0,error:''};
 const net = {connected: false, connecting: false, id: null, rooms: [], room: null, status: 'Sin conexión', hosting: false, addresses: [], internetUrl: '', openingInternet: false};
 const report = (message, kind = 'info') => { if (window && !window.isDestroyed()) window.webContents.send('notice', {message, kind}); };
 function heavyData(){return storagePath(store.state.settings,DATA,{packaged:app.isPackaged});}
-function snapshot() { return {local: store.snapshot(), network: net, game: {running: !!runner.child, mode: runner.mode, bootStage: runner.bootStage || '', ...runner.paths()}, build: '0.5.9-amigos-0.6', starters: starterList(), setup: {...setupStatus(store,runner,setupJob),storage:spaceInfo(heavyData())}}; }
+function snapshot() { return {local: store.snapshot(), network: net, game: {running: !!runner.child, mode: runner.mode, bootStage: runner.bootStage || '', ...runner.paths()}, build: '0.5.9-amigos-0.6.1', starters: starterList(), setup: {...setupStatus(store,runner,setupJob),storage:spaceInfo(heavyData())}}; }
 function publish() { if (window && !window.isDestroyed()) window.webContents.send('state', snapshot()); }
 function send(value) { if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error('Conectate al servidor de salas primero.'); socket.send(JSON.stringify(value)); }
 function endMatch(notifyServer = false) {
@@ -162,7 +162,7 @@ function register() {
         if (runner.child) throw new Error('Cerrá la ventana del juego antes de prepararte.');
         runner.check();
         if (payload.ready === false) send({type: 'ready', ready: false});
-        else send({type: 'ready', card: store.onlineSave().toString('base64'), build: 'ygofm-0.5.9-amigos-v6-direct', deckLabel: store.onlineDeckName()});
+        else send({type: 'ready', card: store.onlineSave().toString('base64'), build: 'ygofm-0.5.9-amigos-v61-direct', deckLabel: store.onlineDeckName()});
       } else if (action === 'start-match') send({type: 'start'});
       else if (action === 'refresh') send({type: 'list'});
       else if (action === 'copy-server') { if (net.internetUrl) clipboard.writeText(net.internetUrl); }

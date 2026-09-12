@@ -6,8 +6,8 @@ const net = require('node:net');
 
 // Model the observed RAM screens; deliberately drop button presses and delay loads.
 // No native executable, ROM or window is opened by these tests.
-function model({initial='title', stuck=false}={}) {
-  let time=0, screen=initial, row=0, due=0, pending='', duelAt=0, calls=0;
+function model({initial='title', stuck=false, side=0}={}) {
+  let time=0, screen=initial, row=0, due=0, pending='', duelAt=0, calls=0, ruleRow=2, cardMode=1, pendingMode=0;
   const inputs=[], attempts=new Map();
   function advance(){if(pending&&time>=due){screen=pending;pending='';if(screen==='duel-loading')duelAt=time;}}
   function transition(next){pending=next;due=time+650;screen='loading';}
@@ -18,14 +18,16 @@ function model({initial='title', stuck=false}={}) {
       const buttons=parseInt(m.buttons,16);inputs.push({screen,buttons,time});
       if(buttons===65535)return {ok:true};
       assert.notEqual(screen,'duel-loading','No automatic button after reaching duel');
-      const key=screen+':'+row+':'+buttons,n=(attempts.get(key)||0)+1;attempts.set(key,n);
+      const key=screen+':'+(screen==='rules'?ruleRow:row)+':'+buttons,n=(attempts.get(key)||0)+1;attempts.set(key,n);
       if(stuck||n===1)return {ok:true}; // emulate a press ignored during animation
       if(screen==='title'&&buttons===(65535^8))transition('menu');
       else if(screen==='menu'&&buttons===(65535^64))row++;
       else if(screen==='menu'&&buttons===(65535^16))row--;
       else if(screen==='menu'&&row===2&&buttons===(65535^0x4000))transition('cards');
       else if(screen==='cards'&&buttons===(65535^0x4000))transition('rules');
-      else if(screen==='rules'&&buttons===(65535^8))transition('duel-loading');
+      else if(screen==='rules'&&buttons===(65535^16)){ruleRow=1;pendingMode=1;}
+      else if(screen==='rules'&&ruleRow===0&&buttons===(65535^32)){ruleRow=1;pendingMode=1;}
+      else if(screen==='rules'&&buttons===(65535^8)){assert.equal(pendingMode,1,'Cannot start with numbered cards');cardMode=pendingMode;transition('duel-loading');}
       else assert.fail('Unexpected menu input '+key);
       return {ok:true};
     }
@@ -33,10 +35,12 @@ function model({initial='title', stuck=false}={}) {
     if(m.addr==='8009B26C')b[0]=screen==='duel-loading'?0xc3:0;
     if(m.addr==='80184590'){
       if(['title','menu','cards'].includes(screen)){b.writeUInt32LE(0x800f0af8);b[4]=row;if(screen==='title')b[9]=1;else b[7]=128;if(screen==='cards')b[13]=1;}
-      if(screen==='rules'){b[4]=2;b[6]=1;b[7]=128;b.writeUInt32LE(0x800f0548,16);}
+      if(screen==='rules'){b[4]=2;b[6]=1;b[7]=128;b.writeUInt32LE(0x800f0548,16);b[44]=ruleRow;b[46]=pendingMode;}
     }
+    if(m.addr==='8009B230')b[0]=cardMode;
+    if(m.addr==='8009B1D5')b[0]=side;
     if(m.addr==='800EA004'&&time-duelAt>=300){b.writeUInt16LE(8000);b.writeUInt16LE(8000,32);}
-    if(m.addr==='801A7AD8')for(let i=0;i<(time-duelAt>=1000?5:3);i++)b.writeUInt16LE(0x8000,i*28+22);
+    if(m.addr===(0x801A7AD8+side*15*28).toString(16).toUpperCase())for(let i=0;i<(time-duelAt>=1000?5:3);i++)b.writeUInt16LE(0x8000,i*28+22);
     return {ok:true,hex:b.toString('hex')};
   };
   return {query:q,sleep:async ms=>{time+=ms;advance();},now:()=>time,inputs,attempts};
@@ -79,3 +83,5 @@ test('local control transport handles fragmented replies and closed connections'
   const port=server.address().port;assert.equal((await query(port,{cmd:'frame'})).frame,42);
   await assert.rejects(query(port,{cmd:'frame'}),/cerró la conexión/);
 });
+
+test('first hand detection also works when player 2 begins',async()=>{const m=model({initial:'duel-loading',side:1});await prepareDirectDuel({slot:1,timeout:10000},m);assert(m.inputs.every(i=>i.buttons===65535));});

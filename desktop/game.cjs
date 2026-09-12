@@ -44,6 +44,7 @@ class GameRunner extends EventEmitter {
     const p = this.check(); ensureKeyboard(p.exe); const profile = this.store.profile();
     this.store.backup(profile.id);
     const saveDir = online ? online.saveDir : this.store.profileDir(profile.id);
+    ensureKeyboard(p.exe,saveDir);
     const disc = prepareDisc(p.disc, saveDir);
     const spec = launchSpec({...p, disc, saveDir, name: profile.name, online});
     Object.assign(spec.options.env,applyVideo(saveDir,this.store.state.settings.video),{FM_AMIGOS_CONFIG_DIR:saveDir});
@@ -58,8 +59,9 @@ class GameRunner extends EventEmitter {
       this.emit('exit', {mode, code, signal});
     });
     if(online){this.bootStage='Cargando el duelo…';
-      this.hiddenWindow=this.windowAction('hide').then(handle=>{this.windowHandle=handle;}).catch(()=>{});
-      prepareDirectDuel({port:this.debugPort,slot:online.slot,signal:this.bootAbort.signal,onStage:stage=>{this.bootStage=stage;this.emit('boot-stage',stage);}}).then(()=>{if(this.child===child)this.emit('duel-ready',{session:online.session});}).catch(e=>{if(this.child===child&&!this.bootAbort.signal.aborted){this.emit('problem',e.message);this.stopOnline();}});
+      // Keep the native window visible throughout boot: a failed readiness check must never leave an audio-only game.
+      this.hiddenWindow=Promise.resolve();
+      prepareDirectDuel({port:this.debugPort,slot:online.slot,signal:this.bootAbort.signal,onStage:stage=>{this.bootStage=stage;fs.appendFileSync(logPath,'[amigos-boot] '+stage+'\n');this.emit('boot-stage',stage);},onDiagnostic:value=>{try{fs.appendFileSync(logPath,'[amigos-boot] '+JSON.stringify(value)+'\n');}catch{}}}).then(()=>{if(this.child===child)this.emit('duel-ready',{session:online.session});}).catch(e=>{if(this.child===child&&!this.bootAbort.signal.aborted){this.emit('problem',e.message);this.stopOnline();}});
     }
     this.emit('started', {mode: this.mode}); return {running: true, mode: this.mode};
   }

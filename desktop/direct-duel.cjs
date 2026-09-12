@@ -58,27 +58,39 @@ async function readRam(q, addr, len) {
 async function readState(q) {
   const mode = (await readRam(q, '8009B26C', 1))[0];
   const menu = await readRam(q, '80184590', 64);
-  return {mode, menu, screen: classify(menu, mode)};
+  const screen = classify(menu, mode);
+  const cardMode = screen === 'rules' ? (await readRam(q, '8009B230', 1))[0] : null;
+  return {mode, menu, screen, cardMode};
 }
 async function handReady(q) {
   const s = await readState(q);
   if (s.mode !== 0xc3) return false;
   const lp = await readRam(q, '800EA004', 34);
   if (lp.readUInt16LE(0) !== 8000 || lp.readUInt16LE(32) !== 8000) return false;
-  const hand = await readRam(q, '801A7AD8', 140);
+  const side = (await readRam(q, '8009B1D5', 1))[0];
+  if (side !== 0 && side !== 1) return false;
+  const handAddress = (0x801A7AD8 + side * 15 * 28).toString(16).toUpperCase();
+  const hand = await readRam(q, handAddress, 140);
   for (let i = 0; i < 5; i++) if (!(hand.readUInt16LE(i * 28 + 22) & 0x8000)) return false;
   return true;
 }
-async function prepareDirectDuel({port, slot, signal, onStage = () => {}, timeout = 180000}, dependencies = {}) {
+async function prepareDirectDuel({port, slot, signal, onStage = () => {}, onDiagnostic = () => {}, timeout = 180000}, dependencies = {}) {
   if (![0, 1].includes(slot)) throw Error('Jugador de la sesión no válido.');
   const q = dependencies.query || (message => query(port, message, signal));
   const pause = dependencies.sleep || (ms => sleep(ms, signal));
   const now = dependencies.now || Date.now, deadline = now() + timeout;
+  let lastScreen = '', lastError = '';
+  async function inspect() {
+    const s = await readState(q);
+    const key = s.screen + ':' + s.menu[4] + ':' + s.menu[13] + ':' + s.menu[44] + ':' + s.cardMode;
+    if (key !== lastScreen) { lastScreen = key; onDiagnostic({screen:s.screen, mode:s.mode, cardMode:s.cardMode, menu:s.menu.toString('hex')}); }
+    return s;
+  }
   async function wait(predicate) {
     while (now() < deadline) {
       if (signal?.aborted) throw Error('Preparación cancelada.');
       try { const value = await predicate(); if (value) return value; }
-      catch (error) { if (signal?.aborted) throw error; }
+      catch (error) { if (signal?.aborted) throw error; if (error.message !== lastError) { lastError = error.message; onDiagnostic({error:lastError}); } }
       await pause(140);
     }
     throw Error('No se pudo llegar al primer turno. Volvé a la sala y reintentá.');
@@ -87,13 +99,13 @@ async function prepareDirectDuel({port, slot, signal, onStage = () => {}, timeou
   const neutral = () => q({cmd: 'set_input', buttons: 'FFFF'});
   async function press(mask) {
     await q({cmd: 'set_input', buttons: (65535 ^ mask).toString(16)});
-    try { await pause(160); } finally { if (!signal?.aborted) await neutral(); }
+    try { await pause(65); } finally { if (!signal?.aborted) await neutral(); }
     await pause(160);
   }
   async function act(mask, eligible, expected) {
     let last = -Infinity;
     return wait(async () => {
-      const current = await readState(q);
+      const current = await inspect();
       if (expected(current)) return current;
       // Retry only while still on the originating screen; never mash into a duel.
       if (eligible(current) && now() - last > 900) { last = now(); await press(mask); }
@@ -104,7 +116,7 @@ async function prepareDirectDuel({port, slot, signal, onStage = () => {}, timeou
   await wait(async () => { await q({cmd: 'frame'}); return true; });
   await neutral();
   if (slot === 0) {
-    let state = await wait(async () => { const s = await readState(q); return ['title', 'menu'].includes(s.screen) ? s : false; });
+    let state = await wait(async () => { const s = await inspect(); return ['title', 'menu'].includes(s.screen) ? s : false; });
     if (state.screen === 'title') state = await act(8, s => s.screen === 'title', s => s.screen === 'menu');
     onStage('Preparando los mazos…');
     for (let tries = 0; state.menu[4] !== 2 && tries < 8; tries++) {
@@ -115,6 +127,17 @@ async function prepareDirectDuel({port, slot, signal, onStage = () => {}, timeou
     onStage('Cargando las dos tarjetas…');
     await act(0x4000, s => s.screen === 'menu' && s.menu[4] === 2, s => s.screen === 'cards');
     await act(0x4000, s => s.screen === 'cards', s => s.screen === 'rules');
+    onStage('Activando las ilustraciones de las cartas…');
+    // The rules screen stages its choice at menu+46; the game-wide flag is
+    // committed only when Start accepts the rules. Cursor 1 is OPEN CARD.
+    let rules = await inspect();
+    for (let tries = 0; rules.menu[46] !== 1 && tries < 8; tries++) {
+      const row = rules.menu[44];
+      rules = await act(row >= 2 ? 16 : 32,
+        s => s.screen === 'rules' && s.menu[44] === row && s.menu[46] !== 1,
+        s => s.screen === 'rules' && (s.menu[46] === 1 || s.menu[44] !== row));
+    }
+    if (rules.menu[46] !== 1) throw Error('No se pudo seleccionar OPEN CARD. Volvé a la sala y reintentá.');
     onStage('Entrando al primer turno…');
     await act(8, s => s.screen === 'rules', s => s.screen === 'duel-loading');
   }

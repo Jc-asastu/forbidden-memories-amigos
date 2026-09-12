@@ -150,3 +150,9 @@ test('unfinished direct load returns both players to a retryable room',async t=>
  assert.equal(reset.id,room.id);a.send({type:'duel-ready',session:prep.session});await a.next('error');
  assert(!a.messages.some(m=>m.type==='duel-go'));
 });
+
+test('QWER is installed in the actual per-profile and per-session config directories',t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'fm-session-keys-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const {ensureKeyboard}=require('../desktop/keyboard.cjs'),exe=path.join(root,'engine','game.exe');
+ for(const folder of ['profile','session']){const dir=path.join(root,folder);fs.mkdirSync(dir);fs.writeFileSync(path.join(dir,'keybinds.ini'),'[player1]\ncross = X\n');ensureKeyboard(exe,dir);const config=fs.readFileSync(path.join(dir,'keybinds.ini'),'utf8');assert.match(config,/cross = Q/);assert.match(config,/square = W/);assert.match(config,/circle = E/);assert.match(config,/triangle = R/);assert.match(config,/up = Up/);assert.match(config,/start = Return/);assert.match(fs.readFileSync(path.join(dir,'keybinds.before-qwer.ini'),'utf8'),/cross = X/);fs.writeFileSync(path.join(dir,'keybinds.ini'),'custom later');ensureKeyboard(exe,dir);assert.equal(fs.readFileSync(path.join(dir,'keybinds.ini'),'utf8'),'custom later');}
+});

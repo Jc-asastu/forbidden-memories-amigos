@@ -1,6 +1,6 @@
 {
   "name": "forbidden-memories-amigos",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "description": "Perfiles locales y salas entre amigos para Forbidden Memories Recompiled",
   "main": "desktop/main.cjs",
