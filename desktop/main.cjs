@@ -6,13 +6,13 @@ const os = require('node:os');
 const {WebSocket} = require('ws');
 const {LocalStore} = require('./store.cjs');
 const {Updater}=require('./updater.cjs');
-const {recoverInstallation,findRuntime,rememberInstallation}=require('./installation.cjs');
+const {recoverInstallation,findRuntime,rememberInstallation,incrementalBuildRoot}=require('./installation.cjs');
 const {preserve,inside}=require('../assets/preserve-data.cjs');
 const {spawn}=require('node:child_process');
 const {GameRunner} = require('./game.cjs');
 const {installRuntime} = require('./install.cjs');
 const {startTunnel} = require('./tunnel.cjs');
-const {importImage,setupStatus,DISC_SHA1} = require('./setup.cjs');
+const {importImage,verifyImage,setupStatus,DISC_SHA1} = require('./setup.cjs');
 const {buildRuntime,cancelBuild} = require('./build-runtime.cjs');
 const {storagePath,spaceInfo,checkSpace}=require('./storage.cjs');
 const {ensureKeyboard} = require('./keyboard.cjs');
@@ -31,13 +31,14 @@ const primaryInstance = app.requestSingleInstanceLock();
 if (!primaryInstance) app.quit();
 app.on('second-instance', () => { if (window && !window.isDestroyed()) { if (window.isMinimized()) window.restore(); window.show(); window.focus(); } });
 let store, runner, window, socket, localServer, tunnel, match, updater, quitting = false, installingUpdate = false;
-let identityConfirmed=false;
+let identityConfirmed=false,cpuRoom=null;
+const {DIFFICULTIES,difficulty,practiceCard,cpuConfig}=require('../shared/cpu.cjs');
 const setupJob={busy:false,stage:'',progress:0,error:''};
 function setupLog(event,details={}){try{fs.appendFileSync(path.join(DATA,'setup-events.log'),JSON.stringify({at:new Date().toISOString(),event,...details})+'\n');}catch{}}
 const net = {connected: false, connecting: false, id: null, rooms: [], room: null, status: 'Sin conexión', hosting: false, addresses: [], internetUrl: '', openingInternet: false};
 const report = (message, kind = 'info') => { if (window && !window.isDestroyed()) window.webContents.send('notice', {message, kind}); };
 function heavyData(){return storagePath(store.state.settings,DATA,{packaged:app.isPackaged});}
-function snapshot() { return {local: store.snapshot(), network: net, game: {running: !!runner.child, mode: runner.mode, bootStage: runner.bootStage || '', ...runner.paths()}, build: '0.5.9-amigos-0.7.1', launcher: {confirmed:identityConfirmed,version:app.getVersion(),startPage:process.argv.includes('--multiplayer')?'rooms':'home'}, update: {...updater?.state}, starters: starterList(), setup: {...setupStatus(store,runner,setupJob),storage:spaceInfo(heavyData())}}; }
+function snapshot() { return {cpu:cpuRoom?{...cpuRoom,difficulties:DIFFICULTIES.map(({ai,...d})=>d)}:null,local: store.snapshot(), network: net, game: {running: !!runner.child, mode: runner.mode, bootStage: runner.bootStage || '', ...runner.paths()}, build: '0.5.9-amigos-0.8.0', launcher: {confirmed:identityConfirmed,version:app.getVersion(),startPage:process.argv.includes('--multiplayer')?'rooms':'home'}, update: {...updater?.state}, starters: starterList(), setup: {...setupStatus(store,runner,setupJob),storage:spaceInfo(heavyData())}}; }
 function publish() { if (window && !window.isDestroyed()) window.webContents.send('state', snapshot()); }
 function send(value) { if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error('Conectate al servidor de salas primero.'); socket.send(JSON.stringify(value)); }
 function endMatch(notifyServer = false) {
@@ -104,10 +105,12 @@ async function prepareGame(file){
  if(setupJob.busy)throw Error('Esperá a que termine la preparación.');
  Object.assign(setupJob,{busy:true,error:'',stage:'Preparando tu juego…',progress:0});publish();
  try{
- const existingExe=findRuntime(store.state.settings,DATA,path.dirname(process.execPath)),destination=heavyData();
+ const existingExe=findRuntime(store.state.settings,DATA,path.dirname(process.execPath)),cachedRoot=incrementalBuildRoot(store.state.settings,DATA,path.dirname(process.execPath)),destination=cachedRoot||heavyData();
  setupLog('prepare-request',{source:file,reusingRuntime:!!existingExe});
- store.settings({setupSource:file});checkSpace(destination,existingExe?600*1024**2:4*1024**3);
- const settings=await importImage(file,destination,progress=>{Object.assign(setupJob,progress);publish();});
+ store.settings({setupSource:file});checkSpace(destination,existingExe||cachedRoot?768*1024**2:4*1024**3);
+ let settings;
+ if(store.state.settings.discVerified===DISC_SHA1&&path.resolve(file)===path.resolve(store.state.settings.discPath)){Object.assign(setupJob,{stage:'Comprobando tu imagen guardada…',progress:null});publish();await verifyImage(file);settings={discPath:file,discVerified:DISC_SHA1};}
+ else settings=await importImage(file,destination,progress=>{Object.assign(setupJob,progress);publish();});
  // Commit the verified image BEFORE compilation: closing during a build must not ask for it again.
  store.settings({...settings,setupSource:settings.discPath});publish();
  const exe=existingExe||await buildRuntime(ROOT,destination,settings.discPath,progress=>{Object.assign(setupJob,progress);publish();});
@@ -119,6 +122,28 @@ function register() {
   ipcMain.handle('action', async (event, action, payload = {}) => {
     if (event.sender !== window.webContents) throw new Error('Unknown window');
     try {
+      if(action==='open-cpu-room'){
+        if(runner.child||net.room||setupJob.busy)throw Error('Terminá la partida y salí de la sala actual para jugar contra la máquina.');
+        if(!setupStatus(store,runner,setupJob).ready)throw Error('Primero prepará el juego desde Inicio.');
+        const d=difficulty(store.state.settings.cpuDifficulty||'medium');
+        cpuRoom={name:'Sala de práctica',difficulty:d.id,status:'waiting',opponent:'Máquina',opponentReady:true};publish();return {ok:true,state:snapshot()};
+      }
+      if(action==='cpu-difficulty'){
+        if(!cpuRoom||runner.child)throw Error('Elegí la dificultad antes de comenzar.');
+        const d=difficulty(payload.id);store.settings({cpuDifficulty:d.id});cpuRoom.difficulty=d.id;publish();return {ok:true,state:snapshot()};
+      }
+      if(action==='close-cpu-room'){
+        if(cpuRoom?.status==='preparing'||runner.child?.pid&&runner.mode==='cpu')throw Error('Cerrá la ventana del duelo antes de salir de esta sala.');
+        cpuRoom=null;publish();return {ok:true,state:snapshot()};
+      }
+      if(action==='start-cpu'){
+        if(!cpuRoom||cpuRoom.status!=='waiting'||runner.child||net.room||setupJob.busy)throw Error('La sala no está lista para comenzar.');
+        difficulty(cpuRoom.difficulty);const card=practiceCard(store.onlineSave()),saveDir=store.sessionDirectory(Date.now(),[card,card]);
+        fs.writeFileSync(path.join(saveDir,'cpu_manager.ini'),cpuConfig(cpuRoom.difficulty));
+        cpuRoom.status='preparing';publish();
+        try{await runner.start({kind:'cpu',saveDir,difficulty:cpuRoom.difficulty});}catch(e){cpuRoom.status='waiting';publish();throw e;}
+        return {ok:true,state:snapshot()};
+      }
       if(action==='check-update'){await updater.check();return {ok:true,state:snapshot()};}
       if(action==='download-update'){await updater.download();return {ok:true,state:snapshot()};}
       if(action==='install-update'){
@@ -180,7 +205,7 @@ function register() {
         store.setOnlineDeck(payload.id);
         if (net.room?.players.find(p => p.id === net.id)?.ready) send({type: 'ready', ready: false});
       } else if (action === 'campaign') {
-        if (net.room) throw new Error('Salí de la sala online antes de abrir la campaña.'); if(!setupStatus(store,runner,setupJob).ready)throw Error('Completá los pasos de Inicio para preparar el juego.'); await runner.start();
+        if (net.room||cpuRoom) throw new Error('Salí de la sala antes de abrir la campaña.'); if(!setupStatus(store,runner,setupJob).ready)throw Error('Completá los pasos de Inicio para preparar el juego.'); await runner.start();
       } else if (action === 'connect') await connect(payload.url);
       else if (action === 'disconnect') { endMatch(true); socket?.close(); }
       else if(action==='enter-multiplayer') {
@@ -228,7 +253,8 @@ app.whenReady().then(async () => {
   runner.on('started', publish);
   runner.on('boot-stage',stage=>{net.status=stage;publish();});
   runner.on('duel-ready',({session})=>{if(match?.session===session)send({type:'duel-ready',session});});
-  runner.on('exit', e => { if (e.mode === 'online') endMatch(true); if (e.code && !e.signal) report('El juego se cerró con un error. Se conservó el registro junto al guardado.', 'error'); publish(); });
+  runner.on('cpu-ready',()=>{if(cpuRoom){cpuRoom.status='playing';publish();}});
+  runner.on('exit', e => { if(e.mode==='cpu'&&cpuRoom)cpuRoom.status='waiting'; if (e.mode === 'online') endMatch(true); if (e.code && !e.signal) report('El juego se cerró con un error. Se conservó el registro junto al guardado.', 'error'); publish(); });
   window = new BrowserWindow({width: 1160, height: 800, minWidth: 880, minHeight: 640, title: 'Forbidden Memories · Amigos', icon: path.join(ROOT, 'assets', 'app.ico'), backgroundColor: '#141019', autoHideMenuBar: true, show: !process.argv.includes('--qa'), webPreferences: {preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: !process.argv.includes('--qa')}});
   window.webContents.setWindowOpenHandler(() => ({action: 'deny'}));
   window.webContents.on('will-navigate', event => event.preventDefault());
@@ -251,6 +277,7 @@ app.whenReady().then(async () => {
   if(process.argv.includes('--qa-launcher'))await require('../tests/launcher-qa.cjs')({window,store,runner,updater,DATA,publish,resetIdentity:()=>{identityConfirmed=false;}});
 
   if (process.argv.includes('--qa')) {
+    if(process.argv.includes('--qa-cpu-room'))await require('../tests/cpu-room-qa.cjs')({window,store,runner,DATA,publish});
     if(process.argv.includes('--qa-recovery'))await require('../tests/recovery-qa.cjs')({window,store,DATA,prepareGame,setupJob,publish});
     if(process.argv.includes('--qa-setup-file')){if(!store.state.profiles.length)store.create('Juan');publish();}
     if(process.argv.includes('--qa-setup-flow')){

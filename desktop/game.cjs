@@ -35,23 +35,24 @@ class GameRunner extends EventEmitter {
   check() {
     const p = this.paths();
     if (!p.exe) throw new Error('Falta preparar el juego. Abrí Ajustes y elegí el ejecutable de la recompilación.');
-    if (!fs.existsSync(path.join(path.dirname(p.exe),'.amigos-runtime-v5'))) throw new Error('El motor necesita terminar la actualización antes de jugar.');
+    if (!require('./native-patch.cjs').runtimeCurrent(p.exe)) throw new Error('El motor necesita terminar la actualización antes de jugar.');
     if (!p.disc || !fs.existsSync(p.disc)) throw new Error('Elegí tu imagen de Forbidden Memories en Ajustes.');
     return p;
   }
-  async start(online = null) {
+  async start(session = null) {
+    const cpu=session?.kind==='cpu'?session:null,online=cpu?null:session,direct=cpu||online;
     if (this.child||this.starting) throw new Error('Cerrá la ventana del juego antes de iniciar otra partida.');
     const p = this.check(); ensureKeyboard(p.exe); const profile = this.store.profile();
     this.store.backup(profile.id);
-    const saveDir = online ? online.saveDir : this.store.profileDir(profile.id);
+    const saveDir = direct ? direct.saveDir : this.store.profileDir(profile.id);
     ensureKeyboard(p.exe,saveDir);
     const disc = prepareDisc(p.disc, saveDir);
     const spec = launchSpec({...p, disc, saveDir, name: profile.name, online});
     Object.assign(spec.options.env,applyVideo(saveDir,this.store.state.settings.video),{FM_AMIGOS_CONFIG_DIR:saveDir});
-    if(online){this.bootAbort=new AbortController();this.windowHandle=0;this.starting=true;try{this.debugPort=await new Promise((resolve,reject)=>{const s=net.createServer();s.once('error',reject);s.listen(0,'127.0.0.1',()=>{const port=s.address().port;s.close(()=>resolve(port));});});}finally{this.starting=false;}if(this.bootAbort.signal.aborted)throw Error('Preparación cancelada.');spec.args.push('--debug-port',String(this.debugPort));this.windowScript=path.join(saveDir,'native-window.ps1');fs.copyFileSync(path.join(__dirname,'native-window.ps1'),this.windowScript);}
+    if(direct){this.bootAbort=new AbortController();this.windowHandle=0;this.starting=true;try{this.debugPort=await new Promise((resolve,reject)=>{const s=net.createServer();s.once('error',reject);s.listen(0,'127.0.0.1',()=>{const port=s.address().port;s.close(()=>resolve(port));});});}finally{this.starting=false;}if(this.bootAbort.signal.aborted)throw Error('Preparación cancelada.');spec.args.push('--debug-port',String(this.debugPort));this.windowScript=path.join(saveDir,'native-window.ps1');fs.copyFileSync(path.join(__dirname,'native-window.ps1'),this.windowScript);}
     const logPath = path.join(saveDir, 'last-game.log');
     writeAtomic(logPath, '');
-    const child = spawn(spec.exe, spec.args, spec.options); this.child = child; this.mode = online ? 'online' : 'campaign';
+    const child = spawn(spec.exe, spec.args, spec.options); this.child = child; this.mode = cpu?'cpu':online ? 'online' : 'campaign';
     for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => { try { fs.appendFileSync(logPath, chunk); } catch {} });
     child.once('error', error => this.emit('problem', `No se pudo abrir el juego: ${error.message}`));
     child.once('close', (code, signal) => {
@@ -62,6 +63,9 @@ class GameRunner extends EventEmitter {
       // Keep the native window visible throughout boot: a failed readiness check must never leave an audio-only game.
       this.hiddenWindow=Promise.resolve();
       prepareDirectDuel({port:this.debugPort,slot:online.slot,signal:this.bootAbort.signal,onStage:stage=>{this.bootStage=stage;fs.appendFileSync(logPath,'[amigos-boot] '+stage+'\n');this.emit('boot-stage',stage);},onDiagnostic:value=>{try{fs.appendFileSync(logPath,'[amigos-boot] '+JSON.stringify(value)+'\n');}catch{}}}).then(()=>{if(this.child===child)this.emit('duel-ready',{session:online.session});}).catch(e=>{if(this.child===child&&!this.bootAbort.signal.aborted){this.emit('problem',e.message);this.stopOnline();}});
+    }
+    if(cpu){this.bootStage='Cargando la sala de práctica…';
+      require('./cpu-duel.cjs').prepareCpuDuel({port:this.debugPort,signal:this.bootAbort.signal,onStage:stage=>{this.bootStage=stage;fs.appendFileSync(logPath,'[amigos-cpu] '+stage+'\n');this.emit('boot-stage',stage);}}).then(()=>{if(this.child===child)this.emit('cpu-ready');}).catch(e=>{if(this.child===child&&!this.bootAbort.signal.aborted){this.emit('problem',e.message);child.kill();}});
     }
     this.emit('started', {mode: this.mode}); return {running: true, mode: this.mode};
   }

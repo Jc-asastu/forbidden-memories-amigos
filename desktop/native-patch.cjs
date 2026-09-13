@@ -1,6 +1,6 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path');
-const VERSION='amigos-v5-1.3';
+const VERSION='amigos-v6-1.3';
 function patchNative(project){
  const base=path.join(project,'psxrecomp/runtime/src');
  function edit(file,changes){const p=path.join(base,file);let s=fs.readFileSync(p,'utf8');if(s.includes('AMIGOS_V5_PATCH')){if(file==='main.cpp'&&!s.includes('FM_AMIGOS_CONFIG_DIR')){s=s.replace('static std::filesystem::path psx_user_data_dir(const char* argv0) {','static std::filesystem::path psx_user_data_dir(const char* argv0) {\n    if (const char* p = std::getenv("FM_AMIGOS_CONFIG_DIR")) return std::filesystem::path(p);');fs.writeFileSync(p,s);}return;}for(const [a,b]of changes){if(!s.includes(a))throw Error('El motor cambió: no se pudo aplicar la mejora '+file);s=s.replace(a,b);}fs.writeFileSync(p,'// AMIGOS_V5_PATCH\n'+s);}
@@ -19,5 +19,15 @@ function patchNative(project){
  ['static const char *row_value(int m, int row) {','static const char *row_value(int m, int row) {\n    if (m == MENU_GAME && row == 0) return "1.3x (fixed)";'],
  ['if (m == MENU_GAME && row == 0) s_state.speed = v;','if (m == MENU_GAME && row == 0) s_state.speed = 1;']
  ]);
+ const main=path.join(base,'main.cpp');let text=fs.readFileSync(main,'utf8');
+ if(!text.includes('AMIGOS_ESCAPE_PROTECTED')){
+  for(const reason of ['netplay_barrier_escape','netplay_escape']){
+   const line='netplay_soft_exit("'+reason+'");';
+   if(!text.includes(line))throw Error('No se encontró la salida por Escape: '+reason);
+   text=text.replace(line,'/* AMIGOS: Escape never exits a duel. */');
+  }
+  fs.writeFileSync(main,'// AMIGOS_ESCAPE_PROTECTED\n'+text);
+ }
 }
-module.exports={patchNative,VERSION};
+function runtimeCurrent(exe){try{return fs.readFileSync(path.join(path.dirname(exe),'.amigos-runtime-v5'),'utf8').trim()===VERSION;}catch{return false;}}
+module.exports={patchNative,VERSION,runtimeCurrent};

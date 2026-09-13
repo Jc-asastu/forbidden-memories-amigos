@@ -43,5 +43,10 @@ async function recoverInstallation(store,{installDir}={}){
  return {ready:ready(store.state.settings),recovered:!!Object.keys(values).length,hasImage:!!disc};
 }
 function rememberInstallation(store){if(ready(store.state.settings)){const s=store.state.settings;store.settings({preparedInstallation:{discPath:s.discPath,discVerified:DISC_SHA1,gameExe:s.gameExe,runtimeVersion:VERSION}});}}
-module.exports={compatible,ready,usableDisc,findRuntime,recoverInstallation,rememberInstallation,cachedRuntime};
+function incrementalBuildRoot(settings,data,installDir){
+ for(const root of rootsFor(settings,data,installDir)){const work=path.join(root,'native-0.5.9');
+  if(fs.existsSync(path.join(work,'project','.unpacked'))&&fs.existsSync(path.join(work,'project','generated'))&&fs.existsSync(path.join(work,'project','build-release',EXE))&&fs.existsSync(path.join(work,'toolchain','bin','cmake.exe'))&&fs.existsSync(path.join(work,'toolchain','python','python.exe')))return root;
+ }return '';
+}
+module.exports={incrementalBuildRoot,compatible,ready,usableDisc,findRuntime,recoverInstallation,rememberInstallation,cachedRuntime};
 

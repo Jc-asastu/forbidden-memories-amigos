@@ -3,17 +3,17 @@ const $ = id => document.getElementById(id); let state, page = 'home', toastTime
 function notice(message, kind = 'info') { $('toast').textContent = message; $('toast').className = kind; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, kind === 'error' ? 10000 : 7000); }
 async function action(name, payload) {
   if(name==='choose-disc'){clearTimeout(toastTimer);$('toast').hidden=true;}
-  if((name==='campaign'||(name==='ready'&&payload?.ready!==false))&&state?.local.settings.controlsGuideVersion!==1){if(!await showControls(true))return false;if(!await action('controls-seen'))return false;}
+  if((name==='campaign'||name==='start-cpu'||(name==='ready'&&payload?.ready!==false))&&state?.local.settings.controlsGuideVersion!==1){if(!await showControls(true))return false;if(!await action('controls-seen'))return false;}
   try { const result = await window.amigos.action(name, payload); if (!result.ok) { notice(result.error, 'error'); return false; } if (result.state) render(result.state); return true; }
   catch { notice('No se pudo completar la acción.', 'error'); return false; }
 }
-function showPage(next) { page = next; document.body.classList.toggle('in-arena',next==='rooms');if(next==='rooms'&&window.enterArena)window.enterArena(); for (const name of ['setup', 'home', 'rooms', 'settings']) $(`page-${name}`).hidden = name !== page; document.querySelectorAll('[data-page]').forEach(el => el.classList.toggle('active', el.dataset.page === page)); $('breadcrumb').textContent = {setup:'TODO LISTO, PASO A PASO', home: 'EL DUELO CONTINÚA', rooms: 'UN LUGAR PARA ENCONTRARSE', settings: 'TU JUEGO, A TU MANERA'}[page]; }
+function showPage(next) { if(next==='cpu'&&!state?.cpu){window.enterCpu?.();return;} page = next; document.body.classList.toggle('in-arena',next==='rooms'||next==='cpu');if(next==='rooms'&&window.enterArena)window.enterArena(); for (const name of ['setup', 'home', 'rooms', 'cpu', 'settings']) $(`page-${name}`).hidden = name !== page; document.querySelectorAll('[data-page]').forEach(el => el.classList.toggle('active', el.dataset.page === page)); $('breadcrumb').textContent = {setup:'TODO LISTO, PASO A PASO', home: 'EL DUELO CONTINÚA', rooms: 'UN LUGAR PARA ENCONTRARSE', cpu:'LA MÁQUINA ACEPTA TU DESAFÍO', settings: 'TU JUEGO, A TU MANERA'}[page]; }
 function node(tag, text, className) { const el = document.createElement(tag); if (text !== undefined) el.textContent = text; if (className) el.className = className; return el; }
 function button(text, className, callback) { const el = node('button', text, className); el.onclick = callback; return el; }
 function render(next) {
   state = next; const {local, network, game} = state; const me = local.profiles.find(p => p.id === local.selected);
   renderSetup(me);
-  window.renderLauncher?.(state);
+  window.renderLauncher?.(state);window.renderCpu?.(state);
   renderDecks(me, network, game);
   $('profiles').replaceChildren(...local.profiles.map(p => { const opt = node('option', p.name); opt.value = p.id; return opt; }));
   if (!me) $('profiles').append(node('option', 'Creá tu usuario')); else $('profiles').value = me.id;
@@ -105,8 +105,8 @@ function renderSetup(me){
  $('setup-game-panel').hidden=!me||setup.gameReady&&!setup.busy&&!setup.error;
  $('setup-ready-panel').hidden=!ready;
  $('setup-add-game').hidden=setup.busy||setup.hasImage;
- $('setup-game-title').textContent=setup.hasImage?'Tu imagen ya está guardada':'Agregá tu imagen del juego';
- $('retry-setup').textContent=setup.hasImage?'Continuar preparación':'Reintentar preparación';
+ $('setup-game-title').textContent=setup.engineUpdate?'Tu imagen está guardada. Hay una mejora del motor.':setup.hasImage?'Tu imagen ya está guardada':'Agregá tu imagen del juego';
+ $('retry-setup').textContent=setup.engineUpdate?'Actualizar el motor del juego':setup.hasImage?'Continuar preparación':'Reintentar preparación';
  const disk=setup.storage||{};$('storage-path').textContent=disk.path||'';$('storage-space').textContent=(disk.freeBytes==null?'Espacio no disponible':(disk.freeBytes/1024**3).toFixed(1)+' GB libres')+' · Reservá 4 GB para la preparación inicial';$('choose-storage').disabled=setup.busy||state.game.running;$('retry-setup').hidden=setup.busy||!state.local.settings.setupSource&&!state.local.settings.discPath||setup.gameReady;
  $('setup-progress').hidden=!setup.busy;
  $('setup-stage').textContent=setup.stage||'Preparando…';$('setup-percent').textContent=setup.progress==null?'En progreso…':setup.progress+'%';if(setup.progress==null)$('setup-progress-bar').removeAttribute('value');else $('setup-progress-bar').value=setup.progress||0;

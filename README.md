@@ -50,3 +50,10 @@ Validation: 29 automated tests cover existing multiplayer plus profile reopen/na
 Opening the launcher only checks and recovers compatible local files. It never automatically downloads tools or rebuilds the game. Incomplete preparation requires Continuar preparación; an already verified image is retained before compilation, including after interruption. Compatible engines and completed build caches are reused, and a missing runtime marker is restored from a matching completed cache. Importing the managed BIN itself verifies it in place. Local setup-events.log records startup and preparation decisions for diagnosis.
 
 Validation: 33 Node tests, plus a real isolated Electron import with simulated compiler interruption followed by a new process reopen: image retained, no image picker, explicit resume, and no second compiler attempt.
+
+## 0.8.0 CPU practice and Escape protection
+Jugar vs. la máquina creates a local 2/2 practice room with the CPU already ready, a player-deck selector and Fácil/Medio/Difícil. Comenzar duelo drives the original LOAD and Free Duel menus into the first turn against Simon, whose AI and deck are configured only in a disposable session directory. The campaign card is never overwritten. Five-card hands and 8000 LP remain unchanged; combo width/depth increase from 1 to 3 and the fusion deck gate changes from 20 to 5. All levels use the same balanced dragon deck pool. Balance is preliminary.
+
+Escape no longer invokes the native netplay or connection-barrier exit. Escape in the launcher also cannot leave an active match. This does not add automatic campaign saving: use the original Grabar command. The native marker is amigos-v6-1.3; older motors need one explicit Actualizar el motor del juego step, which reuses existing tools/build output where available and retains the verified BIN. Opening the launcher still never starts preparation automatically.
+
+Validation: 36 Node tests; real Electron practice-room navigation/difficulty/persistence checks; real muted native first turn and CPU monster play; two isolated online clients survive injected Escape at their first turn.

@@ -13,7 +13,8 @@ async function download(url,file,hash,onProgress){if(fs.existsSync(file)){try{aw
 async function buildRuntime(root,data,disc,onProgress=()=>{},options={}){
  canceled=false;const work=path.join(data,'native-0.5.9'),project=path.join(work,'project'),build=path.join(project,'build-release'),exe=path.join(build,EXE),marker=path.join(work,'.complete');
  if(fs.existsSync(marker)&&fs.readFileSync(marker,'utf8')===VERSION&&fs.existsSync(exe)){stageBoot(project,build);fs.writeFileSync(path.join(build,'.amigos-runtime-v5'),VERSION);return exe;}
- checkSpace(data,REQUIRED_BYTES-600*1024**2);buildTemp=tempEnvironment(work);
+ const incremental=fs.existsSync(marker)&&/^amigos-v[56]-1\.3$/.test(fs.readFileSync(marker,'utf8').trim())&&fs.existsSync(exe)&&fs.existsSync(path.join(project,'generated'));
+ checkSpace(data,incremental?768*1024**2:REQUIRED_BYTES-600*1024**2);buildTemp=tempEnvironment(work);
  fs.mkdirSync(work,{recursive:true});const log=path.join(work,'preparation.log');fs.writeFileSync(log,'Forbidden Memories Amigos local preparation\n');
  const vendor=process.resourcesPath&&fs.existsSync(path.join(process.resourcesPath,'vendor','ygofm-setup-0.5.9.zip'))?path.join(process.resourcesPath,'vendor'):path.join(root,'vendor');
  let toolchain=options.toolchain||path.join(work,'toolchain');
@@ -26,7 +27,7 @@ async function buildRuntime(root,data,disc,onProgress=()=>{},options={}){
  // Never modify the user's PATH registry; use the portable compiler in this process only.
  const cli=path.join(project,'psxrecomp','psxrecomp_cli.py'),common=['--project-root',project,'--config',path.join(project,'game.toml'),'--json-progress'];
  onProgress({stage:'Preparando el juego a partir de tu disco…',progress:null});
- await run(python,[cli,'generate',...common,'--disc',disc,'--no-toolchain-download'],{cwd:project,env},log);
+ if(!incremental)await run(python,[cli,'generate',...common,'--disc',disc,'--no-toolchain-download'],{cwd:project,env},log);
  onProgress({stage:'Armando el juego en esta PC. Puede tardar varios minutos…',progress:null});
  await run(python,[cli,'rebuild',...common,'--build-dir',build,'--exe-basename','Yu_Gi_Oh_Forbidden_Memories_Recompiled','--disc',disc,'--no-pgo','--no-toolchain-download','--cmake-extra=-DPSX_DEBUG_TOOLS=ON','--cmake-extra=-DPython3_EXECUTABLE='+python],{cwd:project,env},log);
  if(!fs.existsSync(exe))throw Error('No se encontró el juego preparado. Volvé a intentar.');stageBoot(project,build);fs.writeFileSync(marker,VERSION);fs.writeFileSync(path.join(build,'.amigos-runtime-v5'),VERSION);onProgress({stage:'Juego listo',progress:100});return exe;
