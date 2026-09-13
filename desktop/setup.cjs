@@ -14,9 +14,16 @@ async function resolveImage(file){
  const stat=await fs.promises.stat(file);if(!stat.isFile()||stat.size!==DISC_SIZE)throw Error('Este archivo no corresponde al disco USA compatible. Elegí Yu-Gi-Oh! Forbidden Memories (USA).bin.');
  return file;
 }
+async function verifyImage(file){
+ const source=await resolveImage(file),hash=crypto.createHash('sha1');
+ for await(const chunk of fs.createReadStream(source))hash.update(chunk);
+ if(hash.digest('hex')!==DISC_SHA1)throw Error('El archivo no coincide con la versión USA compatible. No se modificó tu instalación anterior.');
+ return source;
+}
 async function importImage(file,root,onProgress=()=>{}){
  let source;try{source=await resolveImage(file);}catch(e){if(e.code==='ENOENT')throw Error('No encontramos el archivo del juego. Volvé a agregarlo con el botón +.');throw e;}
  const directory=path.join(root,'library');await fs.promises.mkdir(directory,{recursive:true});const target=path.join(directory,'Forbidden Memories (USA).bin'),temporary=path.join(directory,crypto.randomUUID()+'.importing');
+ if(path.resolve(source).toLowerCase()===path.resolve(target).toLowerCase()){onProgress({stage:'Comprobando tu imagen guardada…',progress:null});await verifyImage(source);return {discPath:target,discVerified:DISC_SHA1};}
  const hash=crypto.createHash('sha1');let received=0,last=-1;onProgress({stage:'Comprobando y guardando tu juego…',progress:0});
  try{
   await pipeline(fs.createReadStream(source),new Transform({transform(chunk,encoding,callback){hash.update(chunk);received+=chunk.length;const progress=Math.min(99,Math.floor(received/DISC_SIZE*100));if(progress!==last){last=progress;onProgress({stage:'Comprobando y guardando tu juego…',progress});}callback(null,chunk);}}),fs.createWriteStream(temporary,{flags:'wx'}));
@@ -24,5 +31,5 @@ async function importImage(file,root,onProgress=()=>{}){
   await fs.promises.rename(temporary,target);onProgress({stage:'Juego listo',progress:100});return {discPath:target,discVerified:DISC_SHA1};
  }catch(e){await fs.promises.rm(temporary,{force:true}).catch(()=>{});if(e.code==='ENOSPC')throw Error('El disco elegido se quedó sin espacio al copiar el juego. Tocá «Cambiar carpeta / disco» y reintentá en otro disco.');throw e;}
 }
-function setupStatus(store,runner,job){const me=store.state.profiles.find(p=>p.id===store.state.selected),s=store.state.settings;const gameReady=s.discVerified===DISC_SHA1&&!!s.discPath&&fs.existsSync(s.discPath)&&!!runner.paths().exe&&fs.existsSync(path.join(path.dirname(runner.paths().exe),'.amigos-runtime-v5'));return {...job,hasProfile:!!me,gameReady,ready:!!me&&gameReady&&!job.busy};}
-module.exports={importImage,resolveImage,setupStatus,DISC_SIZE,DISC_SHA1};
+function setupStatus(store,runner,job){const me=store.state.profiles.find(p=>p.id===store.state.selected),s=store.state.settings;const gameReady=s.discVerified===DISC_SHA1&&!!s.discPath&&fs.existsSync(s.discPath)&&!!runner.paths().exe&&fs.existsSync(path.join(path.dirname(runner.paths().exe),'.amigos-runtime-v5'));return {...job,hasProfile:!!me,hasImage:s.discVerified===DISC_SHA1&&!!s.discPath&&fs.existsSync(s.discPath),gameReady,ready:!!me&&gameReady&&!job.busy};}
+module.exports={importImage,verifyImage,resolveImage,setupStatus,DISC_SIZE,DISC_SHA1};

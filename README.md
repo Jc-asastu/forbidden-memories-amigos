@@ -45,3 +45,8 @@ Before replacing an older app, the installer runs a standalone data-preservation
 The launcher background uses locally packaged generated art with lightweight camera drift, glow and particles, honors reduced motion, and has no automatic music. Its card/pyramid art is currently one illustration, not independently animated objects.
 
 Validation: 29 automated tests cover existing multiplayer plus profile reopen/name reuse, independent saves, migration through app-folder removal, destination collisions, release selection, checksums/tampering, corrupt downloads, offline checks and disk errors. Real Electron UI checks cover first user, returning-user confirmation, new name, reopen, existing-name recovery, update notice and offline campaign entry with image/save preservation.
+
+## 0.7.1 preparation recovery
+Opening the launcher only checks and recovers compatible local files. It never automatically downloads tools or rebuilds the game. Incomplete preparation requires Continuar preparación; an already verified image is retained before compilation, including after interruption. Compatible engines and completed build caches are reused, and a missing runtime marker is restored from a matching completed cache. Importing the managed BIN itself verifies it in place. Local setup-events.log records startup and preparation decisions for diagnosis.
+
+Validation: 33 Node tests, plus a real isolated Electron import with simulated compiler interruption followed by a new process reopen: image retained, no image picker, explicit resume, and no second compiler attempt.

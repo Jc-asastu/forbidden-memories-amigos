@@ -104,7 +104,9 @@ function renderSetup(me){
  $('setup-profile-panel').hidden=!!me;
  $('setup-game-panel').hidden=!me||setup.gameReady&&!setup.busy&&!setup.error;
  $('setup-ready-panel').hidden=!ready;
- $('setup-add-game').hidden=setup.busy;
+ $('setup-add-game').hidden=setup.busy||setup.hasImage;
+ $('setup-game-title').textContent=setup.hasImage?'Tu imagen ya está guardada':'Agregá tu imagen del juego';
+ $('retry-setup').textContent=setup.hasImage?'Continuar preparación':'Reintentar preparación';
  const disk=setup.storage||{};$('storage-path').textContent=disk.path||'';$('storage-space').textContent=(disk.freeBytes==null?'Espacio no disponible':(disk.freeBytes/1024**3).toFixed(1)+' GB libres')+' · Reservá 4 GB para la preparación inicial';$('choose-storage').disabled=setup.busy||state.game.running;$('retry-setup').hidden=setup.busy||!state.local.settings.setupSource&&!state.local.settings.discPath||setup.gameReady;
  $('setup-progress').hidden=!setup.busy;
  $('setup-stage').textContent=setup.stage||'Preparando…';$('setup-percent').textContent=setup.progress==null?'En progreso…':setup.progress+'%';if(setup.progress==null)$('setup-progress-bar').removeAttribute('value');else $('setup-progress-bar').value=setup.progress||0;

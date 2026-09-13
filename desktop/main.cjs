@@ -6,6 +6,7 @@ const os = require('node:os');
 const {WebSocket} = require('ws');
 const {LocalStore} = require('./store.cjs');
 const {Updater}=require('./updater.cjs');
+const {recoverInstallation,findRuntime,rememberInstallation}=require('./installation.cjs');
 const {preserve,inside}=require('../assets/preserve-data.cjs');
 const {spawn}=require('node:child_process');
 const {GameRunner} = require('./game.cjs');
@@ -32,10 +33,11 @@ app.on('second-instance', () => { if (window && !window.isDestroyed()) { if (win
 let store, runner, window, socket, localServer, tunnel, match, updater, quitting = false, installingUpdate = false;
 let identityConfirmed=false;
 const setupJob={busy:false,stage:'',progress:0,error:''};
+function setupLog(event,details={}){try{fs.appendFileSync(path.join(DATA,'setup-events.log'),JSON.stringify({at:new Date().toISOString(),event,...details})+'\n');}catch{}}
 const net = {connected: false, connecting: false, id: null, rooms: [], room: null, status: 'Sin conexión', hosting: false, addresses: [], internetUrl: '', openingInternet: false};
 const report = (message, kind = 'info') => { if (window && !window.isDestroyed()) window.webContents.send('notice', {message, kind}); };
 function heavyData(){return storagePath(store.state.settings,DATA,{packaged:app.isPackaged});}
-function snapshot() { return {local: store.snapshot(), network: net, game: {running: !!runner.child, mode: runner.mode, bootStage: runner.bootStage || '', ...runner.paths()}, build: '0.5.9-amigos-0.7.0', launcher: {confirmed:identityConfirmed,version:app.getVersion(),startPage:process.argv.includes('--multiplayer')?'rooms':'home'}, update: {...updater?.state}, starters: starterList(), setup: {...setupStatus(store,runner,setupJob),storage:spaceInfo(heavyData())}}; }
+function snapshot() { return {local: store.snapshot(), network: net, game: {running: !!runner.child, mode: runner.mode, bootStage: runner.bootStage || '', ...runner.paths()}, build: '0.5.9-amigos-0.7.1', launcher: {confirmed:identityConfirmed,version:app.getVersion(),startPage:process.argv.includes('--multiplayer')?'rooms':'home'}, update: {...updater?.state}, starters: starterList(), setup: {...setupStatus(store,runner,setupJob),storage:spaceInfo(heavyData())}}; }
 function publish() { if (window && !window.isDestroyed()) window.webContents.send('state', snapshot()); }
 function send(value) { if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error('Conectate al servidor de salas primero.'); socket.send(JSON.stringify(value)); }
 function endMatch(notifyServer = false) {
@@ -101,8 +103,16 @@ async function openMeeting(internet){
 async function prepareGame(file){
  if(setupJob.busy)throw Error('Esperá a que termine la preparación.');
  Object.assign(setupJob,{busy:true,error:'',stage:'Preparando tu juego…',progress:0});publish();
- try{const destination=heavyData();store.settings({setupSource:file});checkSpace(destination);const settings=await importImage(file,destination,progress=>{Object.assign(setupJob,progress);publish();});
- const exe=await buildRuntime(ROOT,destination,settings.discPath,progress=>{Object.assign(setupJob,progress);publish();});ensureKeyboard(exe);store.settings({...settings,gameExe:exe,setupSource:''});
+ try{
+ const existingExe=findRuntime(store.state.settings,DATA,path.dirname(process.execPath)),destination=heavyData();
+ setupLog('prepare-request',{source:file,reusingRuntime:!!existingExe});
+ store.settings({setupSource:file});checkSpace(destination,existingExe?600*1024**2:4*1024**3);
+ const settings=await importImage(file,destination,progress=>{Object.assign(setupJob,progress);publish();});
+ // Commit the verified image BEFORE compilation: closing during a build must not ask for it again.
+ store.settings({...settings,setupSource:settings.discPath});publish();
+ const exe=existingExe||await buildRuntime(ROOT,destination,settings.discPath,progress=>{Object.assign(setupJob,progress);publish();});
+ ensureKeyboard(exe);store.settings({gameExe:exe,setupSource:''});rememberInstallation(store);setupLog('prepare-complete',{reusedRuntime:!!existingExe});
+
  }catch(e){setupJob.error=e.message;throw e;}finally{setupJob.busy=false;publish();}
 }
 function register() {
@@ -233,13 +243,15 @@ app.whenReady().then(async () => {
   });
   register(); await window.loadFile(path.join(ROOT, 'ui', 'index.html'));
   if(process.argv.includes('--qa-setup-empty')){if(!process.env.FM_AMIGOS_DATA_DIR)throw Error('QA needs isolated data.');store.settings({discPath:'',discVerified:'',onboardingDone:false});}
-  if(store.state.settings.discPath && (store.state.settings.discVerified!==DISC_SHA1||!fs.existsSync(store.state.settings.discPath))){try{await prepareGame(store.state.settings.discPath);}catch{}}
-  if(store.state.settings.discVerified===DISC_SHA1&&runner.paths().exe&&!fs.existsSync(path.join(path.dirname(runner.paths().exe),'.amigos-runtime-v5'))){try{Object.assign(setupJob,{busy:true,stage:'Actualizando tu juego…',progress:null});publish();const destination=heavyData();checkSpace(destination);const exe=await buildRuntime(ROOT,destination,store.state.settings.discPath,p=>{Object.assign(setupJob,p);publish();});store.settings({gameExe:exe});}catch(e){setupJob.error=e.message;}finally{setupJob.busy=false;publish();}}
+  const recovery=await recoverInstallation(store,{installDir:path.dirname(process.execPath)});
+  setupLog('startup',{...recovery,discPath:store.state.settings.discPath,gameExe:store.state.settings.gameExe});
+  // Opening the launcher never downloads or recompiles. An incomplete build resumes through its explicit button.
   publish();
   if(!process.argv.includes('--qa'))updater.check();
   if(process.argv.includes('--qa-launcher'))await require('../tests/launcher-qa.cjs')({window,store,runner,updater,DATA,publish,resetIdentity:()=>{identityConfirmed=false;}});
 
   if (process.argv.includes('--qa')) {
+    if(process.argv.includes('--qa-recovery'))await require('../tests/recovery-qa.cjs')({window,store,DATA,prepareGame,setupJob,publish});
     if(process.argv.includes('--qa-setup-file')){if(!store.state.profiles.length)store.create('Juan');publish();}
     if(process.argv.includes('--qa-setup-flow')){
       if(!process.env.FM_AMIGOS_DATA_DIR)throw Error('QA needs isolated data.');
